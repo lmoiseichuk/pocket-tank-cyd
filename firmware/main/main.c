@@ -364,7 +364,16 @@ static void enter_sleep_for(int wake_after_s) {
     return;
 #endif
     int pct0 = battery_pct(), mv0 = battery_port_vbat_mv();
-    int64_t grace_us = wake_after_s > 0 ? DIRECTOR_GRACE_US : s_rtc ? SLEEP_GRACE_US : SLEEP_GRACE_CLOCKLESS_US;
+    /* (this fork, 2026-10-08) the hour is for a board whose night is the
+       clockless power-off: a PMIC and no clock chip. A board with no PMIC -
+       the Touch-LCD-2, or the CYD built for deepsleep - has no power-off to
+       sync after; its night is a deep sleep with the chip's clock running,
+       so it keeps the 20 minutes the boards with a clock chip keep. Tested
+       on the RTC alone, it light-slept an hour at the grace's ~4.7 mA. */
+    int64_t grace_us;
+    if (wake_after_s > 0) grace_us = DIRECTOR_GRACE_US;
+    else if (s_rtc || !s_pmic) grace_us = SLEEP_GRACE_US;
+    else grace_us = SLEEP_GRACE_CLOCKLESS_US;
     ESP_LOGI(TAG, "sleep: save, panel off, %d s grace then %s | battery %d%% %d mV",
              (int)(grace_us / 1000000),
              wake_after_s > 0 ? "deep sleep with the timer" : night_powers_off() ? (s_rtc ? "PMIC power-off (the PWR key boots it)" : "PMIC power-off (the PWR key boots it; the internet gives the time back)")
