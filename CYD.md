@@ -1,9 +1,393 @@
 # The 2.8" ESP32-S3 CYD (ES3C28P)
 
-The tank on a stock "cheap yellow display": the ES3C28P from QDtech, an
-ESP32-S3 behind a 2.8-inch IPS panel with capacitive touch. No modifications
-to the board - everything here uses it as it comes. The vendor's
-specification: [ES3C28P_ES2N28P_Specification_V1.0.pdf](https://www.lcdwiki.com/res/ES3C28P/ES3C28P_ES2N28P_Specification_V1.0.pdf).
+This is LM's fork of [pocket-tank](https://github.com/mediacutlet/pocket-tank).
+It runs the same tank, the same model and the same game on a stock "cheap
+yellow display" as well: the ES3C28P from QDtech, an ESP32-S3 behind a
+2.8-inch IPS panel with capacitive touch. No modifications to the board -
+everything here uses it as it comes. The vendor's specification:
+[ES3C28P_ES2N28P_Specification_V1.0.pdf](https://www.lcdwiki.com/res/ES3C28P/ES3C28P_ES2N28P_Specification_V1.0.pdf).
+
+Upstream's three Waveshare boards build from this tree as before, and
+[README.md](README.md) is upstream's own, with one block at its top that
+points here. This page is the CYD owner's: what the fork changes, how the
+tank is used on the CYD's glass, how to build and flash it, the board and
+what the port changed, and how the fork stays in step with upstream.
+
+A new board shows the vendor's demo until it is flashed: back it up and
+flash it first (*Building and flashing*), then *Using it*.
+
+## What this fork changes
+
+Against upstream's main (`git log upstream/main..main`):
+
+- **A fourth board.** `CONFIG_POCKET_TANK_BOARD_CYD_320X240` builds a
+  320 x 240 tank for the ES3C28P: an ILI9341 display port over SPI, the
+  FT6336 touch, the ES8311 on the CYD's own pins. It is built and flashed by
+  cable with `tools/build_cyd.sh` (*Building and flashing*).
+- **Pages for a 240 px glass.** `common/ui.h` scales the pages to the
+  page the build draws; the stats card goes to two columns, the milestones page
+  takes 24 px badges, and the shop and settings span the whole glass
+  (*What the port changes*).
+- **Two settings rows of the CYD's own.** SCREEN turns the picture on a
+  board with no IMU and becomes ROTATION when one answers; SLEEP (NEVER /
+  SCREEN / LIGHT) chooses what every way into sleep does (*Settings*).
+- **A sleep that never deep-sleeps.** Two sleep modes upstream does not
+  have, screen and lightsleep, darken the tank and wake it on a touch, a
+  pick-up or BOOT; the CYD ships on lightsleep (*Sleep*).
+- **A second IMU.** An MPU-6050 beside the QMI8658, each a Kconfig line,
+  probed at boot. The CYD has neither on the board: a breakout goes on its
+  I2C socket, and laying the board face down then sleeps the tank
+  (*The IMU*).
+- **What the CYD goes without.** No updates over Wi-Fi and no UPDATES
+  button, no battery pill or page, no PWR key, no clock chip (*What the CYD
+  does not have*).
+- **Two rules scaled to the smaller tank, on the CYD only.** The model's
+  distance bands scale with the tank's width, and the algae films the glass
+  at the 1.8's pace per cell (*What the port changes*).
+- **The simulator's fourth world.** `make -C sim BOARD_CYD_320X240=1` builds
+  `fishsim-cyd_320x240`, and `make -C sim check-all` runs the selftests in
+  all four worlds.
+
+What reaches upstream's boards: the IMU code split into one driver per chip
+(`imu_port.c`, `imu_qmi8658.c`, `imu_mpu6050.c`), the sleep-mode choice in
+Kconfig (deepsleep, their default, which is upstream's behaviour), and the
+touch hooks. Their simulator pages are byte for byte upstream's; their
+firmware builds, and has been read against upstream's, not run on one of
+those boards.
+
+## Using it
+
+Day to day on the glass the CYD is the tank README.md describes under
+[*The living tank*](README.md#the-living-tank): the same fish, cards,
+badges, shop and chores. What
+follows is how to reach each thing on this board, and where it differs.
+
+### Finding the pages
+
+- **Tap a fish** for its stats card at the top left: the needs down the
+  left, the traits and MORE down the right, and the toolbox under it. The
+  card goes by itself after 10 s; a tap on empty glass closes it.
+- **Tap the card, or its MORE,** for the milestones page: a row per fish,
+  the TANK row with the sand dollar at its left and your balance under the
+  coin, and three buttons at the foot:
+  SETTINGS, UPGRADES and CLOSE.
+- **SETTINGS**, at the bottom left of the milestones page, opens the
+  settings page. **UPGRADES**, or the sand dollar, opens the shop.
+- **CLOSE** on the settings page or the shop goes back to the milestones
+  page; CLOSE on the milestones page goes back to the tank.
+
+So settings are three taps away: a fish, its card, SETTINGS.
+
+### Feeding
+
+Tap the water's surface - the top 26 px of the tank, about 5 mm of the
+CYD's glass - or drag down from the top edge, and pellets drop where the
+finger is. Not with a tool in hand. With AUTO FEED on, the tank also drops a
+pellet when somebody is really hungry; with it off every meal is yours.
+
+### The light
+
+Two quick taps on the glass, then a pause, turn the tank light off and on,
+while LIGHTS OUT is on DOUBLE-TAP, the default. Step the row's arrows to a
+time, from 5 SEC to 30 MIN, and the tank goes dark by itself after that long
+without being handled - a touch, or with an IMU fitted, being held - and the
+double-tap no longer works the light. The light is the tank's day and night,
+not the board's sleep (*Sleeping and waking*).
+
+Three quick taps spook the fish near the finger. A finger held still on the
+glass for three seconds brings over the fish that trust you.
+
+### Wiping, trimming and the toolbox
+
+With bare hands one stroke can do both chores: a stroke across the glass
+wipes the algae off it, and a sideways stroke that starts on the grass
+trims the fronds it crosses.
+
+Under a fish's stats card are two tools for doing only one. Tap the sponge
+and strokes only wipe algae; tap the scissors and they only trim grass.
+While a tool is in hand the glass takes its strokes and nothing else; DONE
+at the top left puts it back, and it goes back by itself after two minutes
+without a stroke.
+
+### Renaming or selling a fish
+
+On the milestones page, tap a fish's name for its card: its name, its
+stage, what it is worth, and RENAME and SELL.
+
+- **RENAME** opens the letter wheel: swipe a letter up or down, DONE keeps
+  the name, CANCEL leaves it as it was.
+- **SELL** turns into the price and OK?, and the worth line into TAP AGAIN
+  TO SELL; a second tap sells the fish for sand dollars. A tank keeps at
+  least two fish, so with two the button is dim.
+
+### The shop
+
+UPGRADES on the milestones page, or the sand dollar on its TANK row. A row
+per item with its price and UNLOCK, lit once you can afford it and dim until
+then, or IN TANK once you own it; the arrows at the top right turn to the
+second page, and HOW TO EARN lists what pays.
+
+Tap a row for the item's card: its picture, its words, its price, and
+UNLOCK, which buys it. A tap anywhere else closes the card.
+
+A plant or a decoration you buy comes up on its placement page, PLACE THE
+<ITEM>: drag it left or right along the floor, pick its DEPTH (BEHIND,
+AMONG or IN FRONT; some pieces offer two of the three), and DONE at the top
+right keeps it there. The coral adds a COLOR row and the reef cluster a
+LOOK row.
+
+To move or sell it later, hold a still finger on the piece in the tank for
+a moment (0.7 s), and its placement page opens with SELL at the top left;
+or tap its row in the shop, whose card has MOVE and SELL. SELL takes two
+taps: the first shows the refund and OK?, the second sells.
+
+### Settings
+
+| row | choices | what it does |
+|---|---|---|
+| BRIGHTNESS | 30% / 60% / 100% | the backlight, kept in NVS |
+| VOLUME | OFF / QUIET / NORMAL | the sound, kept in NVS. "FISH ARE QUIET AT NIGHT" under it is a note, not a row |
+| LIGHTS OUT | DOUBLE-TAP, or 5 SEC to 30 MIN | DOUBLE-TAP: the double-tap works the tank light. A time: the light goes out by itself after that long unhandled (*The light*) |
+| AUTO FEED | ON / OFF | ON: the tank feeds a fish that is really hungry. OFF: only you feed; a fish left starving in a lit tank slowly loses trust |
+| SCREEN | UPRIGHT / FLIPPED | with no IMU answering: turns the picture and the touch 180 degrees, kept in NVS |
+| ROTATION | one padlock button, with LOCKED or UNLOCKED beside it | in SCREEN's place once an IMU answers. Tap the padlock to lock the picture the way up it is now; tap it again to let it follow the board turned over |
+| SLEEP | NEVER / SCREEN / LIGHT | what every way into sleep does: NEVER ignores it, SCREEN darkens the glass with the chip awake, LIGHT darkens it and light-sleeps. LIGHT is the factory default; a choice is kept in NVS and applies from the next sleep (*Sleeping and waking*) |
+
+At the foot: the release and the build id, small and dim ("V0.3.3 ALPHA
+BUILD ...", cut short of CLOSE), and CLOSE. There is no UPDATES button.
+
+### Sleeping and waking
+
+What puts the tank to sleep:
+
+- a short press of **BOOT** (at its release);
+- **laying it face down**, level and still, for 2 s - with an IMU fitted;
+- the director's `deepsleep [N]` and `poweroff`, over the serial port
+  (*The serial console (the director)*).
+
+What happens is the SLEEP row's: with NEVER nothing does, with SCREEN or
+LIGHT the tank saves, the backlight and the sound go off, and the glass is
+dark for as long as it takes. It never deep-sleeps. In the board's case BOOT
+cannot be reached, so with no IMU fitted nothing on the glass puts the tank
+to sleep.
+
+What wakes it, where it was, fish and all:
+
+- **a touch** on the glass. That touch does nothing in the tank;
+- **a pick-up or a tilt**, with an IMU, once it has lain still for about a
+  second after going dark;
+- **turning it face up**, in place of a touch or a pick-up, if it went
+  dark lying face down;
+- **BOOT**.
+
+The time it was dark is lived through at the wake, as a night is: the fish
+grow at a quarter of the pace, get hungry, the grass and the algae grow. On
+LIGHT with a USB host attached it stays awake instead of light-sleeping, so
+on the bench LIGHT behaves as SCREEN. Nothing takes it back into the dark by
+itself: a wake nobody meant leaves it lit (*Still open*).
+
+### Gestures, in short
+
+On the glass, with no tool in hand:
+
+| gesture | what the tank does |
+|---|---|
+| tap a fish | its stats card; tap the card for the milestones page |
+| tap the surface (the top 26 px), or drag down from the top edge | pellets drop where the finger is |
+| a stroke across the glass | wipes the algae it crosses |
+| a sideways stroke that starts on the grass | trims the fronds it crosses |
+| two quick taps, then a pause | the tank light on or off (LIGHTS OUT on DOUBLE-TAP, the default) |
+| three quick taps | the fish near the finger bolt and stay spooked |
+| a finger held still for about three seconds | the fish that trust you come over |
+| a finger held still on a decoration you own, 0.7 s | its placement page, with SELL |
+| a swipe along the milestones page's TANK row | the next page of the tank's badges, when it has more than one |
+
+The movement gestures need an IMU. The CYD has none on the board: a
+QMI8658 or an MPU-6050 breakout on its I2C socket (VCC 3V3, GND, SDA IO16,
+SCL IO15), detected at boot - which chips, and the wiring pin by pin, in
+*Supported IMUs, and wiring one*. Turning, holding still and handling
+are the AMOLED board's too; face down is the CYD's. Moving it, and BOOT:
+
+| gesture | what the tank does |
+|---|---|
+| turn it upside down, about 0.75 s | the picture and touch turn 180 degrees to stay readable; turn it back and they follow |
+| lay it flat, or stand it on its side | nothing - it keeps the way it was, so it never flaps on a table |
+| pick it up, carry it | the sound stays warm, and holding it counts as attention for the tank light |
+| lay it screen down, level and still, 2 s | it saves, darkens and sleeps, as a short press of BOOT |
+| turn it screen up, or pick it up | it wakes where it was, fish and all |
+| touch the glass while it sleeps | it wakes where it was; that touch does nothing in the tank (not while it lies face down) |
+| short press of BOOT | sleeps the tank; another press wakes it in place (face down or not) |
+| hold BOOT and tap the glass | the *Reset tank?* prompt |
+
+The SLEEP row decides what every way into sleep does, face down included.
+How each gesture is told apart: *Gestures* under *The IMU*.
+
+### Starting over
+
+Hold BOOT and tap the glass: a *Reset tank?* prompt comes up over the water
+with NO and YES. YES wipes the save, and two new fry take the tank with the
+first-run setup to name them; NO, a sleep, or twenty seconds with no answer
+keep everything.
+
+YES erases the tank's whole NVS namespace. BRIGHTNESS, SCREEN and SLEEP are
+saved again at once, so they stay as they were. LIGHTS OUT, AUTO FEED and
+the ROTATION lock live in the save and go back to their defaults. VOLUME
+keeps sounding as it was until the next restart, and is NORMAL after it.
+
+BOOT cannot be reached in the board's case: take it out, or erase the save
+over the cable, which keeps the app and the model (*Recovering a board*).
+
+### What the CYD does not have
+
+- **No updates over Wi-Fi.** The settings page has no UPDATES button, and
+  the tank never restarts into update mode or asks for a network; nor does
+  it take the time from the internet, which upstream does only on a board
+  with a PMIC. A new version goes on by cable (*Building and flashing*).
+- **No battery pill or battery page.** They need the AMOLED's fuel gauge
+  (the AXP2101); with none answering the tank never shows them, and the
+  low-battery notice never comes. The cell's voltage reaches GPIO9, but
+  nothing reads it yet (*Still open*).
+- **No PWR key.** BOOT is the sleep key.
+- **No clock chip.** The time runs on through sleep; a power cut or the
+  RESET button loses it (*Still open*).
+
+## Building and flashing
+
+The browser installer is for upstream's boards only; the CYD is built and
+flashed from this tree with ESP-IDF 5.5 (`IDF_PATH`, or
+`~/.espressif/esp-idf/v5.5`). `tools/build_cyd.sh` runs on Linux: it
+flashes only through a `/dev/serial/by-id/` path, which other systems do
+not have. Elsewhere, build with the script and no port, then run its last
+`idf.py` line by hand with your own port.
+
+**Find the port.** With the board plugged in, `ls /dev/serial/by-id/`
+lists it as
+`usb-Espressif_USB_JTAG_serial_debug_unit_<MAC>-if00`; `<port>` below is
+that whole path. Never a `/dev/ttyACM<n>`, whose numbers shuffle between
+plug-ins; the script refuses anything that is not a by-id path.
+
+**Back up the factory image first**, before the first flash; with it the
+board goes back to how it arrived (*Recovering a board*):
+
+```sh
+. "${IDF_PATH:-$HOME/.espressif/esp-idf/v5.5}/export.sh"   # esptool.py comes with ESP-IDF
+esptool.py --chip esp32s3 -p <port> -b 921600 read_flash 0 0x1000000 factory_16MB.bin
+```
+
+**Then build and flash:**
+
+```sh
+tools/build_cyd.sh                                     # build only
+tools/build_cyd.sh <port> --model                      # the first time: the app and the 8 MB model partition
+tools/build_cyd.sh <port>                              # after that: the app
+```
+
+The first boot after the first flash opens the first-run setup, the
+welcome and the names for the two fry, as README.md's
+[*The living tank*](README.md#the-living-tank) describes under *First run*.
+
+The script uses its own build directory (`firmware/build_cyd`) and its own
+sdkconfig - `sdkconfig.defaults` with `sdkconfig.defaults.cyd` on top - so
+the AMOLED build is untouched, and it flashes nothing when the build fails.
+The defaults only fill in what an sdkconfig lacks, so a changed default
+would never reach the existing one; the script starts it afresh whenever a
+defaults file is newer.
+
+Every build is signed, as upstream's are, with
+`firmware/keys/ota_signing_key.pem` (never committed; `firmware/keys/` is
+not in a clone). `tools/ota_key.sh` makes one if it is missing; it loads
+ESP-IDF from `~/esp/esp-idf`, so with ESP-IDF elsewhere source its
+`export.sh` and run the script's own three lines:
+
+```sh
+mkdir -p firmware/keys
+espsecure.py generate_signing_key --version 2 --scheme rsa3072 firmware/keys/ota_signing_key.pem
+chmod 600 firmware/keys/ota_signing_key.pem
+```
+
+The CYD takes no updates over the air, so which key signs its image does
+not matter to it.
+
+**Updating keeps the tank**, as on the AMOLED board: the script writes the
+bootloader, the partition table, the app and a fresh otadata (`0xA90000`,
+which app slot boots), and the save in NVS (`0x9000`, 24 KB) is left
+alone. The model partition is written only with `--model`.
+
+### The serial console (the director)
+
+The firmware reads commands on the same USB port its log goes out on.
+`tools/director.py -p <port> <command>` sends one and prints the reply;
+`tools/director.py -p <port> help` lists them all, and
+`tools/director.py -p <port> --watch` streams the log. Opening the port
+this way does not restart the board. The ones a CYD owner uses:
+
+- `imu` - eight raw IMU readings, a quarter second apart: the way to set a
+  new IMU's axes (*The IMU*).
+- `deepsleep [N]` and `poweroff` - put the tank to sleep as BOOT does; with
+  `N`, it wakes by itself after `N` seconds.
+- `clock` - the tank's time and where it came from.
+
+The boot log, with its I2C bus scan, shows only from a restart. From
+`firmware/`, the script's own `idf.py` line with `monitor` in place of
+`flash` restarts the board and shows it from the first line; Ctrl+] leaves:
+
+```sh
+idf.py -B build_cyd -D SDKCONFIG="build_cyd/sdkconfig" -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.cyd" -p <port> monitor
+```
+
+### Recovering a board
+
+Each of these needs ESP-IDF's environment (the `export.sh` line above).
+
+- **Back up the save** before any flash you are unsure of, and put it back
+  if the tank is lost. `firmware/partitions.csv` puts NVS at `0x9000`,
+  `0x6000` long, and it never moves:
+
+  ```sh
+  esptool.py --chip esp32s3 -p <port> -b 921600 read_flash 0x9000 0x6000 nvs.bin
+  esptool.py --chip esp32s3 -p <port> write_flash 0x9000 nvs.bin
+  ```
+
+- **Start a fresh tank without BOOT** by erasing the save alone; the app and
+  the model stay, and the next boot opens the first-run setup. Brightness,
+  the SCREEN row and the SLEEP row go with it:
+
+  ```sh
+  esptool.py --chip esp32s3 -p <port> erase_region 0x9000 0x6000
+  ```
+
+- **Start over from a blank board**: erase all of it and flash the model
+  again:
+
+  ```sh
+  esptool.py --chip esp32s3 -p <port> erase_flash
+  tools/build_cyd.sh <port> --model
+  ```
+
+- **Put the factory image back:**
+
+  ```sh
+  esptool.py --chip esp32s3 -p <port> -b 921600 write_flash 0 factory_16MB.bin
+  ```
+
+- **No port, or a board that restarts over and over:** take the board out
+  of its case, hold BOOT, press and release RESET, then release BOOT. The
+  chip waits in its ROM's download mode, where `esptool.py` reaches it
+  whatever the flash holds; the by-id path is the same. Press RESET again
+  after flashing to run the new image.
+
+### The simulator
+
+The simulator runs the CYD's world on the desktop, the same `common/` code
+at 320 x 240, for previews and the selftests:
+
+```sh
+make -C sim BOARD_CYD_320X240=1             # builds sim/fishsim-cyd_320x240
+make -C sim BOARD_CYD_320X240=1 check       # its selftests
+```
+
+README.md's [*Try it: PC simulator*](README.md#try-it-pc-simulator) has the
+rest: what it needs, the keys and the flags.
 
 ## The board, against the Waveshare AMOLED
 
@@ -21,30 +405,6 @@ specification: [ES3C28P_ES2N28P_Specification_V1.0.pdf](https://www.lcdwiki.com/
 Pins: `firmware/main/board_pins.h`, from section 4.2 of the specification.
 The LCD resets with the chip (CHIP_PU), so there is no reset pin to drive.
 
-## Building and flashing
-
-```sh
-tools/build_cyd.sh                                     # build only
-tools/build_cyd.sh <port> --model                      # the first time: app + the model partition
-tools/build_cyd.sh <port>                              # after that: the app
-```
-
-`<port>` is `/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_<MAC>-if00`,
-never a `/dev/ttyACM<n>`, whose numbers shuffle between plug-ins. The script
-uses ESP-IDF 5.5 (`IDF_PATH`, or `~/.espressif/esp-idf/v5.5`), its own build
-directory (`firmware/build_cyd`) and its own sdkconfig - `sdkconfig.defaults`
-with `sdkconfig.defaults.cyd` on top - so the AMOLED build is untouched.
-The defaults only fill in what an sdkconfig lacks, so a changed default would
-never reach the existing one; the script starts it afresh whenever a defaults
-file is newer.
-
-Back up the factory image before the first flash; the board then goes back
-to how it arrived with one `write_flash`:
-
-```sh
-esptool --chip esp32s3 -p <port> -b 921600 read_flash 0 0x1000000 factory_16MB.bin
-```
-
 ## What the port changes
 
 **The tank's size is the board's.** `common/tank.h` takes `TANK_W` x `TANK_H`
@@ -54,12 +414,12 @@ builds the simulator at that size (`fishsim-cyd_320x240`) for previews. The
 tank scene lays itself out from those two already.
 
 **The pages scale, the pixel art does not.** `common/ui.h`: `UI(n)` is a length
-designed at 368 px of height and `UI_TEXT(s)` a text scale, both scaled to
-the build's height - identities on the AMOLED, about 0.65 on the CYD. At 143
-ppi against 322 a page at 0.65 of the pixels still stands a little larger in
-the hand than the original. Icons are drawn a pixel at a time and keep their
+designed at 368 px of page height and `UI_TEXT(s)` a text scale, both scaled
+to the page the build draws - identities on the AMOLED, about 0.65 on the
+CYD. At 143 ppi against 322 a page at 0.65 of the pixels still stands a
+little larger in the hand than the original. Icons are drawn a pixel at a time and keep their
 size; where they would not fit, the page is laid out for the short tank
-instead (`UI_COMPACT`):
+instead (the CYD's blocks in `common/render.h` and `common/render.c`):
 
 - the **stats card** goes to two columns, the needs down the left and the
   traits and MORE down the right (its 24 px and 16 px icons cannot shrink);
@@ -87,9 +447,17 @@ distances into near, mid and far at 70, 180 and 380 px of the 448-wide tank
 it was trained on; they now scale by `TANK_W / 448`, so a 320-wide tank asks
 about distances the model knows.
 
-**A save file is shaped by its tank.** It carries the algae grid, whose size
-follows the tank, so the migration for the first installer's 1432-byte saves
-applies to the 448 x 368 build alone.
+**The algae grows at the 1.8's pace per cell.** Its steps were tuned on the
+1.8's 28 x 23 = 644 cells of glass; the CYD's is 20 x 15 = 300. A step
+claims or thickens one cell, so at the same pace per step the CYD's film
+covered its glass twice as fast, and a night filmed it to the cap. On the
+CYD a step comes once per 644 / 300 of the time instead, so a night lands
+near DIRTY there too (`common/tank.c`, `ALGAE_STEP_*`).
+
+**A save file is the same on every board.** Since v0.3.3 every board keeps
+the 1.8's 644 algae cells, the CYD's 300 among them. A save the CYD wrote
+before that - 1312, 1320 or 1328 bytes, lengths no other build ever wrote -
+is moved into place on load (`common/progression.c`).
 
 **Display:** the ILI9341 scans landscape through MADCTL (`swap_xy` and the
 mirrors), so a frame goes out row by row, only byte-swapped, from two
@@ -104,10 +472,10 @@ analog supply here; the port's call to do so finds none and does nothing.
 
 **Clock:** there is no RTC chip. ESP-IDF's system time runs on through deep
 sleep on the chip's own RTC timer, so with no chip answering, a plausible
-system time is kept and only a power-on is seeded from the build time. A
-night in deep sleep is lived through at the wake, as on the AMOLED; without
-this the re-seed put the clock behind the save's stamp and the sleep counted
-as nothing.
+system time is kept and a power-on is seeded from the save's stamp, or
+from the build time if that is later. A night in deep sleep is lived
+through at the wake, as on the AMOLED; without this the re-seed put the
+clock behind the save's stamp and the sleep counted as nothing.
 
 **Touch:** the FT5x06 driver with the reset on GPIO18. On the bench the panel
 reads turned 180 degrees from the picture, and the AMOLED's 10 px
@@ -126,9 +494,10 @@ finger-landing correction made every miss land above its button, so it is
 - Sound, on a speaker on the board's socket: the codec and amplifier up
   255 ms after the first touch, down 5 s after the last sound; 17 of the 24
   cues are in the bank.
-- Sleep on BOOT: a short press darkens the tank and light-sleeps it; a press
-  within 20 min resumes in place (a 6 s nap, the fish where they were). Past
-  that it deep-sleeps, and BOOT - or the director's timer - wakes it with a
+- Sleep on BOOT, in the deepsleep build (then the only mode): a short
+  press darkens the tank and light-sleeps it; a press within 20 min
+  resumes in place (a 6 s nap, the fish where they were). Past that it
+  deep-sleeps, and BOOT - or the director's timer - wakes it with a
   boot that puts the fish back and lives the time through (240 s asleep came
   back as 0.1 h).
 - On the I2C bus: 0x18 (the ES8311), 0x38 (the FT6336) and, with the
@@ -173,7 +542,7 @@ it was on:
 - **a touch** - a finger on the glass, once the glass has been seen without
   one. The finger on the glass at the wake does nothing in the tank.
 - **a pick-up or a tilt** (below).
-- **face up**, and only that, in a dark begun face down: lying on its glass
+- **face up**, in place of a touch or motion, in a dark begun face down: lying on its glass
   the table could be the finger, and a knock read as motion would light it
   face down, where the gesture, already spent, could not darken it again.
   For the same reason face up counts on two reads in a row, 0.2 s apart:
@@ -267,8 +636,9 @@ flipped the picture 0.6 s later, back upright flipped it back, on its side in
 either direction changed nothing, and a pick-up read MOVING.
 
 **Face down sleeps the tank** (`POCKET_TANK_IMU_FACE_DOWN_SLEEP`, on for the
-CYD). Screen down, level and still for 2 s is a short press of the sleep key:
-the tank saves, darkens and light-sleeps. "Still" here is a motion count
+CYD). Screen down, level and still for 2 s is a short press of the sleep key,
+and what follows is the SLEEP row's: on LIGHT, the default, the tank saves,
+darkens and light-sleeps. "Still" here is a motion count
 under 1000 a poll, not the handling detector's 220: a hand steadying the
 board reads 200-800, which kept the gesture from firing on the bench. **Any
 sleep that starts face down wakes when it is turned face up** - the
@@ -304,21 +674,21 @@ row and is unchanged.
 
 How each one is told apart. Every movement reading is the IMU polled at 4 Hz
 by `imu_port_poll` (`firmware/main/imu_port.c`), in counts at +-2 g (16384 a
-g); the README's *Gestures* table is the keeper's version of this.
+g); *Gestures, in short* is the keeper's version of this.
 
 | gesture | detected as | effect | where |
 |---|---|---|---|
 | upside down | the up axis past 0.21 g the other way, and dominant over the other in-screen axis, for 3 polls (~0.75 s) | picture and touch turn 180 degrees | `imu_port.c`, applied per frame in `main.c` |
 | flat, or on its side | the up axis not dominant | nothing: the last orientation holds | the same vote |
 | picked up, carried | one poll's summed change over 220 (~0.013 g): `moving`, held 1 s | the codec stays warm | `main.c`, `audio_port_prewarm` |
-| held | `moving` on two polls in a row: `handled` | counts as attention for the light's idle rule (AUTO) | `tank_handled` |
+| held | `moving` on two polls in a row: `handled` | counts as attention for the light's idle rule (LIGHTS OUT set to a time) | `tank_handled` |
 | screen down, level, still, 2 s (CYD) | out-of-glass axis over 0.5 g toward the table, in-screen axes under 0.35 g, motion under 1000, 8 polls; once per lie-down | sleeps as a BOOT press | `imu_port_take_face_down`, `main.c` |
 | screen up / picked up, asleep (CYD) | no longer face down on two reads in a row, 0.2 s apart (one read, each 1 s of the deepsleep mode's grace) | wakes in place - after a sleep that began face down | `imu_port_face_down_now`, `enter_dark` |
 | picked up or tilted, dark (CYD) | still for ~1 s sets the rest pose; then off it by 2500 (~0.15 g) on two reads in a row, 0.2 s apart; not in a dark begun face down | wakes in place | `imu_port_rest_moved`, `enter_dark` |
 | a touch, dark (CYD) | a finger on the glass, after the glass was seen clear; not in a dark begun face down | wakes in place; that touch does nothing in the tank | `touch_port_finger_now`, `touch_port_swallow` |
 | BOOT, short press | the button (GPIO0), at release | sleep - on the CYD the dark, which a press ends; in the deepsleep mode a press within the 20-minute grace wakes in place, and after it BOOT boots | `sleep_button_poll`, `enter_sleep_for` |
 | BOOT held + a tap | a touch landing while BOOT is down | the *Reset tank?* prompt | `sleep_button_poll` |
-| double-tap the glass | two quick taps, then a pause (LIGHTS OUT = MANUAL, the default) | the tank light on / off, saved | `tank.c` (`light_manual_off`) |
+| double-tap the glass | two quick taps, then a pause (LIGHTS OUT on DOUBLE-TAP, the default) | the tank light on / off, saved | `tank.c` (`light_manual_off`) |
 
 The face-down rows need `POCKET_TANK_IMU_FACE_DOWN_SLEEP` (on for the CYD),
 and the SLEEP row on SCREEN or LIGHT where there is one (NEVER ignores the
@@ -370,10 +740,122 @@ there needs the IMU's INT line wired (below).
   whose ratio is still to be measured. Without a meter the battery pill and
   its page stay hidden (the page is still laid out for 448 x 368).
 - **A power cut, or the RESET button, loses the time** (it resets the chip's
-  RTC timer too): the clock starts again from the build time, and that
-  absence is not lived through. Deep sleep keeps it.
+  RTC timer too): the clock starts again from the save's stamp (or the
+  build time, if that is later), and that absence is not lived through.
+  Deep sleep keeps it.
 - **Sending while drawing.** A frame is drawn and then sent, one after the
   other; sending it while the next one is drawn would lift the ceiling at
   40 MHz to about 33 fps.
 - **The decorations** keep their pixel sizes: the castle is 146 px tall in a
   240 px tank. Worth a look on the glass.
+
+## Syncing with upstream
+
+The fork takes upstream's releases by merging them; it never sends anything
+back. The `upstream` remote is `https://github.com/mediacutlet/pocket-tank.git`
+with its push URL set to `no_push`, so a push there fails. Every line the
+fork changes in an upstream file is a conflict waiting at the next sync,
+which is why the CYD's code sits in blocks of its own and README.md is
+upstream's text but for one block.
+
+1. **Fetch, and branch off main:**
+
+   ```sh
+   git fetch upstream
+   git log --oneline main..upstream/main          # what is coming
+   git switch -c sync-<release> main
+   git merge upstream/main
+   ```
+
+2. **Resolve.** The CYD lives in `#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240`
+   blocks, so a conflict is usually upstream's change and the fork's block
+   side by side, and both stay. Where conflicts land:
+   - `common/render.h` - the CYD's page layouts are one block at the end of
+     the file that redefines upstream's names, so upstream's own lines stay
+     as written; a new layout name upstream adds may need a CYD value there.
+     The fork's settings taps (`SET_TAP_FLIP`, `SET_TAP_SLEEP`) are numbered
+     past upstream's, and a static assert keeps them there.
+   - `common/render.c` - the CYD's paths for the card, the badges, the shop
+     coin and the settings rows.
+   - `firmware/main/main.c` - the IMU, the sleep modes and the dark, the
+     SCREEN and SLEEP rows, and the update paths the CYD leaves out.
+   - `sim/main.c` - the CYD's selftest expectations and snapshots.
+   - `firmware/main/touch_port_ft3168.c` - the FT6336's init and its turn.
+   - `README.md` - take upstream's text and put the fork's block back under
+     the title; `git diff upstream/main -- README.md` shows that block and
+     nothing else.
+   - `firmware/main/imu_port_qmi8658.c` - deleted in the fork, split into
+     `imu_port.c` and `imu_qmi8658.c`. A change upstream makes to it is
+     carried into the split by hand.
+   - `common/setup.c` and `common/setup.h` - the first-run setup and the
+     placement page, where the fork wrote every measurement as `UI(n)`
+     in place of upstream's literal. Almost any upstream edit to them
+     conflicts; keep upstream's change and the `UI()` around its numbers.
+   - `common/icons.c` and `common/icons.h` - generated by
+     `tools/gen_icons.py`, which in the fork also writes the 24 px badge
+     copies. Never merge them by hand: take upstream's, resolve
+     `tools/gen_icons.py` if it conflicts, and run the script again.
+   - `docs/DEVICE.md` - upstream's bench log, with a fork section, *The CYD
+     right now*, and a CYD note in its first rule. It conflicts where
+     upstream edits beside them.
+   - Smaller blocks that can meet an upstream edit:
+     `firmware/main/CMakeLists.txt` and `Kconfig.projbuild` (the board, the
+     IMUs, the sleep modes), `board_pins.h`, `audio_port_es8311.c`,
+     `director.c`, `common/tank.c` (the algae pace),
+     `common/llm/advisor_core.c` (the distance bands) and
+     `common/progression.c` (the old CYD saves).
+
+   Some changes merge cleanly and are still wrong:
+   - a new question in `display_port.h` needs its answer in
+     `display_port_ili9341.c`, or the CYD does not link;
+   - a new badge (`assets/icons/ms_*.png`) gets its 24 px copy when
+     `tools/gen_icons.py` runs, but it also needs its pair in `badge_art()`'s
+     table in `common/render.c`. Without one it draws at 32 px in the CYD's
+     28 px rows, over its neighbours, with no error;
+   - a new page measurement upstream writes as a literal, not `UI(n)`,
+     draws at full size on the CYD's 240 px page;
+   - a rule upstream adds that is keyed on the tank's size needs a look at
+     320 x 240.
+
+3. **The simulator, in all four worlds:**
+
+   ```sh
+   make -C sim check-all          # the 1.8, the round board, the watch, then the CYD
+   ```
+
+4. **Upstream's three worlds against upstream's own tree.** Build upstream's
+   simulator in a worktree of `upstream/main` (it needs its own `sim/lvgl`),
+   write each world's pages with `--snapshot <prefix>` from `fishsim`,
+   `fishsim-round` and `fishsim-watch` in both trees, and compare them with
+   `cmp`. The only difference expected is the build line, which prints the
+   tree's own `git describe`; any other page that differs is the fork
+   reaching an upstream board.
+
+5. **The four firmware images build:** `tools/build_cyd.sh` with no port,
+   and the 1.8, the round board and the watch with `idf.py`, each into its
+   own build directory as README.md's
+   [*Run it on real hardware*](README.md#run-it-on-real-hardware) shows.
+
+6. **Back up the CYD's NVS - the tank's save - before flashing it:**
+
+   ```sh
+   esptool.py --chip esp32s3 -p <port> -b 921600 read_flash 0x9000 0x6000 nvs_before_<release>.bin
+   ```
+
+   `firmware/partitions.csv` puts NVS at `0x9000`, `0x6000` long, and it
+   never moves. A flash that loses the tank goes back with
+   `esptool.py --chip esp32s3 -p <port> write_flash 0x9000
+   nvs_before_<release>.bin` (*Recovering a board*).
+
+7. **Flash the CYD** with `tools/build_cyd.sh <port>` and check it on the
+   glass: the tank loads the save it had, the pages and the settings rows
+   answer, and it sleeps and wakes.
+
+8. **Only then fast-forward main:**
+
+   ```sh
+   git switch main
+   git merge --ff-only sync-<release>
+   ```
+
+   Nothing is ever pushed to `upstream`; `origin` is the fork.
