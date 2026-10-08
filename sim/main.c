@@ -1141,10 +1141,13 @@ static int saves_check(const char *what, const uint8_t *e, float bubble_default)
         tank.sd_unlocks != (sv_u32(e, 1488) & ((1u << SD_ITEM_COUNT) - 1))) SV_FAIL("sand dollars %d (earned %d), unlocks %02x", tank.sd_balance, tank.sd_earned, tank.sd_unlocks);
     if (tank.snail_grazed != (int32_t)sv_u32(e, 1612)) SV_FAIL("the snail's tally %d", (int)tank.snail_grazed);
     float castle_x = sv_f32(e, 1616);
-    if (castle_x > 0) {                                  /* (this fork) where this board's floor lets it stand, as the bubble column:
-                                                            the fixtures' 250 is past the end of the CYD's 320 px floor */
+#ifdef TANK_CYD
+    if (castle_x > 0) {                                  /* (this fork) where the CYD's floor lets it stand, as the bubble column:
+                                                            the fixtures' 250 is past the end of its 320 px floor. The CYD's
+                                                            alone: on the other boards a saved castle that moved is a failure */
         static tank_t probe; tank_init(&probe, 8); tank_decor_set(&probe, 2, castle_x, DECOR_Z_FRONT); castle_x = probe.castle_x;
     }
+#endif
     if (sv_f32(e, 1616) > 0 && (tank.castle_x != castle_x || tank.castle_z != (e[1620] == DECOR_Z_BACK + 1 ? DECOR_Z_BACK : DECOR_Z_FRONT)))
         SV_FAIL("castle at %.0f depth %d", tank.castle_x, tank.castle_z);
     if (sv_u32(e, 1632) && tank.coral_rgb != (sv_u32(e, 1632) & 0xffffff)) SV_FAIL("coral color %06x", tank.coral_rgb);
