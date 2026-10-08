@@ -102,7 +102,8 @@
 #define PIN_I2C_SDA       48       /* shared: touch, IMU, the P2 header */
 #define PIN_I2C_SCL       47
 #define PIN_TP_RST        -1       /* the LCD's reset net (above) */
-#define PIN_TP_INT        46       /* low while touched (the port polls instead); a strapping pin */
+#define PIN_TP_INT        46       /* the CST816D's INT, active low (held or pulsed: unseen here); the port polls, and
+                                      the dark arms it as a light-sleep wake (touch_port_wake_gpio); a strapping pin, only read */
 #define I2C_ADDR_CST816D  0x15
 #define PIN_IMU_INT1      3        /* QMI8658 at 0x6B, unused (the port polls) */
 #define PIN_BAT_ADC       5        /* ADC1_CH4: VBAT through 200K / 100K, so x3 */

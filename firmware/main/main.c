@@ -96,9 +96,10 @@ static const char *s_sleep_why = "?";      /* what asked for the next sleep, for
 /* (this fork) the 320x240 boards' SLEEP row (sleep_setting.h, 2026-10-08):
  * on a CYD or a Touch-LCD-2 built for none, screen or lightsleep the mode is
  * the keeper's, chosen at run time, and the build's mode only its factory
- * default. The dark is compiled for every such build - one built for none too, since SCREEN and
- * LIGHT are a tap away - and the tests of the build's mode below become
- * tests of the choice. The name in the log lines is the choice's. */
+ * default. The dark is compiled for every such build - one built for none
+ * too, since SCREEN and LIGHT are a tap away - and the tests of the build's
+ * mode below become tests of the choice. The name in the log lines is the
+ * choice's. */
 #ifdef SLEEP_SETTING_ROW
 static const char *sleep_mode_name(void) {
     int choice = sleep_setting();

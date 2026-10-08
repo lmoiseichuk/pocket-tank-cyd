@@ -807,7 +807,10 @@ day it slept as upstream's boards do, deep after the 20-minute grace, and
 only BOOT brought it back; a Touch-LCD-2 built for deepsleep still does,
 and so does one built from an sdkconfig made before then, which keeps the
 deepsleep it holds - the defaults only fill in what an sdkconfig lacks, so
-delete it first (*Building and flashing*, below).
+delete it first (*Building and flashing*, below). On such a build nothing
+holds the backlight pin (GPIO1) through the grace's light sleep or the deep
+sleep after it, and the panel gets DISPOFF, not SLPIN: if the glass glows
+or the night costs more than it should, look there first.
 Face down does not sleep it: the gesture needs the axis out of the glass,
 and this QMI8658's axes are not measured (`POCKET_TANK_IMU_FACE_DOWN_SLEEP`
 stays off). In the dark's light sleep it keeps its backlight (GPIO1) low
@@ -830,7 +833,24 @@ What only its own hardware can confirm, since nobody here has one:
   touch brings it back in time for the next look;
 - **what the dark draws.** The panel gets DISPOFF, not SLPIN, and the IMU
   stays awake for the pick-up; if the glass glows or the cell drains faster
-  than it should, the backlight's hold and those two are where to look.
+  than it should, the backlight's hold and those two are where to look. The
+  touch controller is looked at ten times a second, which may keep the
+  CST816D out of its own doze;
+- **whether GPIO46 holds low under a resting finger or pulses.** The dark
+  arms it only while it reads high, so a held line costs nothing; a line
+  that pulses while a finger or a palm rests on the glass - as the CST816
+  family's default is said to - would end each slice of a dark begun that
+  way at the next pulse, and the dark would look many times a second, not
+  ten, until the glass is clear. Its IMU reads are counted in looks, so the
+  same would shorten the settle before the rest pose and the gap between
+  the two reads a pick-up needs, and a knock could read as a pick-up;
+- **what floats in each light-sleep slice.** Only the backlight and the TF
+  card's select are held. The LCD's own select (GPIO45, a strapping pin
+  with no pull-up), its DC and the SPI lines float, as the CYD's do, and so
+  does the I2C bus (GPIO47, GPIO48) if the board has no pull-ups of its own,
+  which its 400 kHz bus suggests it has. If the panel comes back blank, turned
+  or with its colours wrong after a dark, or the touch or the IMU stops
+  answering after one, add those pins to the board's `BOARD_DARK_HELD_PINS`.
 
 **Building and flashing.** Its defaults are `firmware/sdkconfig.defaults.wst`,
 on top of `sdkconfig.defaults` as the CYD's are, into its own build

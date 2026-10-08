@@ -4307,7 +4307,7 @@ static int selftest_card(const char *prefix) {
 
 int main(int argc, char **argv) {
 #ifdef CONFIG_POCKET_TANK_320X240
-    render_settings_set_sleep(SET_SLEEP_LIGHT);   /* (this fork) the CYD's SLEEP row starts where the CYD's build does (sdkconfig.defaults.cyd) */
+    render_settings_set_sleep(SET_SLEEP_LIGHT);   /* (this fork) a 320x240 board's SLEEP row starts where its build does (sdkconfig.defaults.cyd and .wst) */
 #endif
     for (int a = 1; a < argc; a++)
         if (strcmp(argv[a], "--greedy") == 0) advisor_core_sample = false;
@@ -4442,7 +4442,7 @@ int main(int argc, char **argv) {
             else if (r == SET_TAP_FEED) printf("auto feed: %s\n", v ? "ON" : "OFF");
             else if (r == SET_TAP_ROTATE) printf("rotation: %s\n", v ? "LOCKED" : "unlocked");
 #ifdef CONFIG_POCKET_TANK_320X240
-            else if (r == SET_TAP_SLEEP) {                     /* (this fork) the CYD's SLEEP row: the firmware keeps it in NVS */
+            else if (r == SET_TAP_SLEEP) {                     /* (this fork) a 320x240 board's SLEEP row: the firmware keeps it in NVS */
                 render_settings_set_sleep(v);
                 const char *name = "LIGHT";
                 if (v == SET_SLEEP_NEVER) name = "NEVER";

@@ -6,9 +6,9 @@
  * and it is kept in NVS beside the brightness ("tank"/"sleep") and re-saved
  * after a tank reset erases NVS - but only a choice the keeper made: the
  * build's default is never written, so a later build with another default
- * still brings its own. With nothing saved it is the build's Kconfig sleep mode, which is
- * therefore only the factory default: none is NEVER, screen is SCREEN,
- * lightsleep is LIGHT.
+ * still brings its own. With nothing saved it is the build's Kconfig sleep
+ * mode, which is therefore only the factory default: none is NEVER, screen
+ * is SCREEN, lightsleep is LIGHT.
  *
  * deepsleep is a build choice only. A 320x240 board built for it has no
  * row, and neither has an AMOLED board (they choose at build time, as

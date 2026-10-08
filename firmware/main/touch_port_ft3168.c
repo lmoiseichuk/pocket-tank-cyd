@@ -756,14 +756,16 @@ void touch_port_show_battery(bool on) { s_bat = on; if (on) { s_bat_us = esp_tim
 bool touch_port_finger_now(void) {
     if (!s_tp) return false;
 #if CONFIG_POCKET_TANK_WST_320X240
-    /* (this fork, 2026-10-08) The Touch-LCD-2's CST816D can stop answering
-       I2C while it idles - the CST816 family dozes after a few seconds with
-       no finger, and wakes on a touch. A read it does not answer is no
-       finger, but the CST816S driver and each I2C layer under it log an
-       error for it ("I2C read failed", "i2c transaction failed", the NACK):
-       a handful of lines ten times a second, for as long as the dark lasts. A probe of its address first is silent on a NACK (only a
-       stuck bus logs), so a dozing chip is passed over quietly, and the read
-       goes ahead only when it answers. */
+    /* (this fork, 2026-10-08) The Touch-LCD-2's CST816D may stop answering
+       I2C while it idles: the CST816 family has an auto-sleep a few seconds
+       after the last finger, woken by a touch - unseen on this chip, since
+       nobody here has the board. A read it does not answer is no finger,
+       but the CST816S driver and each I2C layer under it log an error for
+       it ("I2C read failed", "i2c transaction failed", the NACK): a handful
+       of lines ten times a second, for as long as the dark lasts. A probe of
+       its address first is silent on a NACK (only a stuck bus logs), so a
+       dozing chip is passed over quietly, and the read goes ahead only when
+       it answers. */
     if (i2c_master_probe(board_i2c_bus(), I2C_ADDR_CST816D, 20) != ESP_OK) return false;
 #endif
     if (esp_lcd_touch_read_data(s_tp) != ESP_OK) return false;   /* no answer: no finger */

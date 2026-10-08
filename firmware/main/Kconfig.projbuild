@@ -23,9 +23,11 @@ menu "pocket-tank"
             2026-10-08): common/tank.h's 320x240 tank and the pages laid out
             for it, touch already landscape from the driver with no finger
             bias, the settings page's compact rows, no update channel (OTA
-            hidden), the CYD's old saves read back, and the algae paced for
-            its 300 cells. Not chosen by hand: the board entries above select
-            it, and tankcore's CMakeLists hands it to common/.
+            hidden), the CYD's old saves read back, the algae paced for its
+            300 cells, and the sleep modes that go dark (screen, lightsleep)
+            with the settings page's SLEEP row. Not chosen by hand: the board
+            entries above select it, and tankcore's CMakeLists hands it to
+            common/.
     config POCKET_TANK_DISPLAY_ILI9341
         bool "Drive the CYD's ILI9341 over SPI, backlight PWM on GPIO45"
         depends on POCKET_TANK_CYD_320X240
@@ -176,11 +178,12 @@ menu "pocket-tank"
             director's timer lights it again where it was. The touch that
             wakes it does nothing in the tank. Made for the CYD, whose case
             covers BOOT, and offered on the 320x240 boards (this fork,
-            2026-10-08: the Touch-LCD-2's too, which wakes on its CST816D's
-            INT as the CYD on its FT6336's): the AMOLED's panel sleep
-            holds its touch controller in reset and cuts the panel's rails,
-            so its dark could not wake on a touch, and cycling those rails
-            beside an awake IMU is what railed its X and Z on 2026-08-31.
+            2026-10-08: the Touch-LCD-2's too, its CST816D's INT armed as a
+            light-sleep wake as the CYD's FT6336's is): the AMOLED's panel
+            sleep holds its touch controller in reset and cuts the panel's
+            rails, so its dark could not wake on a touch, and cycling those
+            rails beside an awake IMU is what railed its X and Z on
+            2026-08-31.
             On the 320x240 boards, none, screen and lightsleep are only the
             factory default: the settings page's SLEEP row (NEVER / SCREEN /
             LIGHT) changes the mode at run time, and the choice is kept in

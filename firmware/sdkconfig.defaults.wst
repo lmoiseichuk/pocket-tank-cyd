@@ -23,7 +23,8 @@ CONFIG_POCKET_TANK_IMU_MPU6050=n
 CONFIG_POCKET_TANK_IMU_AUTO_FLIP=n
 # Face down does not sleep it (CONFIG_POCKET_TANK_IMU_FACE_DOWN_SLEEP stays
 # off, its default here): the gesture needs the axis out of the glass, and
-# this QMI8658's axes are not measured. The SLEEP row and BOOT still sleep it.
+# this QMI8658's axes are not measured. BOOT and the director's sleeps still
+# sleep it; the SLEEP row says what that does.
 # Sleep goes dark and light-sleeps, and never deep, as the CYD's does
 # (2026-10-08): a touch on the glass or a pick-up lights it again where it
 # was, and BOOT is no longer the only way back. Only the factory default:
