@@ -70,8 +70,9 @@ instead (`UI_COMPACT`):
 - **settings** gains a SCREEN row, UPRIGHT or FLIPPED, for a board with no
   IMU to turn the picture (`firmware/main/orientation.c`, kept in NVS beside
   the brightness, and re-saved after a tank reset as the brightness is).
-  Once an IMU answers, the same row is FACE DOWN, SLEEP / IGNORE instead
-  (see *The IMU*).
+  Once an IMU answers, the same row is ROTATION instead (see *The IMU*).
+  Under it, IMU or not, a **SLEEP** row - NEVER / SCREEN / LIGHT - picks
+  what every way into sleep does (see *Sleep*); a deepsleep build has none.
 
 Every page of the AMOLED build renders pixel-for-pixel as it did before the
 port: the sim's `--snapshot` set (69 pages) was compared before and after.
@@ -136,19 +137,28 @@ finger-landing correction made every miss land above its button, so it is
 
 ## Sleep
 
-**The CYD never deep-sleeps** (2026-10-08). In its case BOOT cannot be
+**The CYD as shipped never deep-sleeps** (2026-10-08). In its case BOOT cannot be
 reached, and deep sleep hears nothing else, so after the 20-minute grace
-the tank stayed dark for good. What sleep does is now a Kconfig choice,
-`POCKET_TANK_SLEEP_MODE`, and every way into sleep goes through it: BOOT's
-short press, the face-down gesture, the director's `deepsleep [N]` and
-`poweroff`, and the PWR key on a board with a PMIC.
+the tank stayed dark for good. What sleep does is the sleep mode, and every
+way into sleep goes through it: BOOT's short press, the face-down gesture,
+the director's `deepsleep [N]` and `poweroff`, and the PWR key on a board
+with a PMIC.
 
-| mode | Kconfig | sleep is |
-|---|---|---|
-| none | `POCKET_TANK_SLEEP_NONE` | nothing: one log line says what asked and that it was ignored |
-| screen | `POCKET_TANK_SLEEP_SCREEN` | the dark, with the CPU running |
-| lightsleep | `POCKET_TANK_SLEEP_LIGHT` (the CYD's, `sdkconfig.defaults.cyd`) | the dark, light-sleeping between looks; never deep sleep |
-| deepsleep | `POCKET_TANK_SLEEP_DEEP` (the default, so the AMOLED's) | the grace, then deep sleep or the PMIC power-off, as it always was |
+On the CYD the mode is the keeper's: the settings page's **SLEEP** row
+(NEVER / SCREEN / LIGHT, 2026-10-08) changes it at run time, kept in NVS as
+`tank/sleep` and re-saved after a tank reset if the keeper chose one (the
+build's default is never written). The Kconfig choice,
+`POCKET_TANK_SLEEP_MODE`, is only the factory default - what the tank does
+until a segment is tapped; the boot log says which of the two it is.
+deepsleep is a build choice only: a CYD built for it has no SLEEP row and
+sleeps as deepsleep always has, the face-down gesture included.
+
+| mode | Kconfig (on the CYD, the row's factory default) | SLEEP row | sleep is |
+|---|---|---|---|
+| none | `POCKET_TANK_SLEEP_NONE` | NEVER | nothing: one log line says what asked and that it was ignored |
+| screen | `POCKET_TANK_SLEEP_SCREEN` | SCREEN | the dark, with the CPU running |
+| lightsleep | `POCKET_TANK_SLEEP_LIGHT` (the CYD's, `sdkconfig.defaults.cyd`) | LIGHT | the dark, light-sleeping between looks; never deep sleep |
+| deepsleep | `POCKET_TANK_SLEEP_DEEP` (the default, so the AMOLED's) | no row | the grace, then deep sleep or the PMIC power-off, as it always was |
 
 screen and lightsleep are offered on the CYD alone. The AMOLED's panel
 sleep holds its touch controller in reset and cuts the panel's rails, so a
@@ -281,12 +291,14 @@ Bench, 2026-09-30, the breakout held flat against the back: face down slept
 the tank and face up woke it within a second; BOOT woke it and slept it again
 while it lay face down, and that BOOT sleep woke on face up too.
 
-**The settings page's SCREEN row becomes FACE DOWN, SLEEP / IGNORE, once an
-IMU answers.** The row was the keeper's way to turn the picture on a board
-with no IMU; with one, the IMU turns it, so the row's place goes to the
-gesture's switch (SLEEP by default, kept in NVS as `tank/facedn`), and a
-SCREEN choice saved before is set aside. With no IMU the row is SCREEN, as
-before. The AMOLED's layout has no such row and is unchanged.
+**The settings page's SCREEN row becomes ROTATION once an IMU answers.** The
+row was the keeper's way to turn the picture on a board with no IMU; with
+one, the IMU turns it, so the row is ROTATION, and a SCREEN choice saved
+before is set aside. With no IMU the row is SCREEN, as before. The gesture
+has no switch of its own any more (FACE DOWN, SLEEP / IGNORE, until
+2026-10-08): it does what the SLEEP row says, and NEVER ignores it as it
+does every other way into sleep (*Sleep*). The AMOLED's layout has neither
+row and is unchanged.
 
 ### Gestures
 
@@ -308,10 +320,11 @@ g); the README's *Gestures* table is the keeper's version of this.
 | BOOT held + a tap | a touch landing while BOOT is down | the *Reset tank?* prompt | `sleep_button_poll` |
 | double-tap the glass | two quick taps, then a pause (LIGHTS OUT = MANUAL, the default) | the tank light on / off, saved | `tank.c` (`light_manual_off`) |
 
-The face-down rows need `POCKET_TANK_IMU_FACE_DOWN_SLEEP` (on for the CYD)
-and FACE DOWN = SLEEP in settings. In the deepsleep mode, deep sleep after
-the grace hears only BOOT: waking it on movement there needs the IMU's INT
-line wired (below).
+The face-down rows need `POCKET_TANK_IMU_FACE_DOWN_SLEEP` (on for the CYD),
+and the SLEEP row on SCREEN or LIGHT where there is one (NEVER ignores the
+gesture; a deepsleep build has no row and always sleeps). In the deepsleep
+mode, deep sleep after the grace hears only BOOT: waking it on movement
+there needs the IMU's INT line wired (below).
 
 ## Still open
 

@@ -18,8 +18,11 @@ CONFIG_POCKET_TANK_IMU_MPU6050_UP_AXIS=0
 CONFIG_POCKET_TANK_IMU_MPU6050_UP_NEGATIVE=y
 CONFIG_POCKET_TANK_IMU_MPU6050_OUT_AXIS=2
 CONFIG_POCKET_TANK_IMU_MPU6050_OUT_NEGATIVE=y
-# Face down for 2 s sleeps the tank, face up wakes it.
+# Face down for 2 s sleeps the tank, face up wakes it (unless the SLEEP row
+# says NEVER).
 CONFIG_POCKET_TANK_IMU_FACE_DOWN_SLEEP=y
 # Sleep goes dark and light-sleeps, and never deep: in its case BOOT, the
 # only key deep sleep hears, cannot be reached. A touch or a pick-up wakes it.
+# Only the factory default (2026-10-08): the settings page's SLEEP row
+# (NEVER / SCREEN / LIGHT) changes it at run time, kept in NVS (tank/sleep).
 CONFIG_POCKET_TANK_SLEEP_LIGHT=y

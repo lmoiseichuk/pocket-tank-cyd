@@ -1,4 +1,4 @@
-set(SRCS main.c director.c brightness.c orientation.c batlog.c codec_port.c advisor_llm_esp.c battery_port_axp2101.c imu_port.c
+set(SRCS main.c director.c brightness.c orientation.c sleep_setting.c batlog.c codec_port.c advisor_llm_esp.c battery_port_axp2101.c imu_port.c
          update_mode.c net_port_esp.c model_trailer.c)
 if(CONFIG_POCKET_TANK_DISPLAY_SH8601)
     list(APPEND SRCS display_port_sh8601.c)

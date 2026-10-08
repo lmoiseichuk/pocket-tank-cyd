@@ -508,11 +508,11 @@ void touch_port_poll(tank_t *t) {
         if (r) ESP_LOGI(TAG, "settings: %s %d", r == SET_TAP_CLOSE ? "CLOSE" : r == SET_TAP_BRIGHT ? "brightness" : r == SET_TAP_VOLUME ? "volume"
                                                   : r == SET_TAP_LIGHT ? "lights out" : r == SET_TAP_SCREEN ? "screen (1 = turned)"
                                                   : r == SET_TAP_FEED ? "auto feed (1 = on)" : r == SET_TAP_ROTATE ? "rotation (1 = locked)"
-                                                  : r == SET_TAP_FLIP ? "screen" : r == SET_TAP_FACE ? "face down" : "idle seconds", v);
+                                                  : r == SET_TAP_FLIP ? "screen" : r == SET_TAP_SLEEP ? "sleep" : "idle seconds", v);
         if (r == SET_TAP_CLOSE) { s_set = false; s_ms = true; s_back = true; }   /* back to the milestones page (2026-09-16); the release is spent */
         else if (r == SET_TAP_UPDATES) { s_set = false; s_upd = true; s_back = true; ESP_LOGI(TAG, "updates page up"); }
         else if (r == SET_TAP_BRIGHT || r == SET_TAP_VOLUME || r == SET_TAP_LIGHT || r == SET_TAP_IDLE || r == SET_TAP_FEED || r == SET_TAP_ROTATE
-                 || r == SET_TAP_FLIP || r == SET_TAP_FACE) { s_set_what = r; s_set_val = v; }   /* FLIP, FACE: the CYD's rows */
+                 || r == SET_TAP_FLIP || r == SET_TAP_SLEEP) { s_set_what = r; s_set_val = v; }   /* FLIP, SLEEP: the CYD's rows */
     }
     if (s_upd && !s_cf && !su) {                             /* the UPDATES page: CHECK (main restarts), FORGET, CLOSE */
         int r = updates_page_touch(tx, ty, touched);

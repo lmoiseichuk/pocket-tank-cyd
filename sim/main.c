@@ -804,6 +804,27 @@ static int night_shift_check(void) {
     return 0;
 }
 
+#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+/* (this fork) which SLEEP segment the settings page drew lit, read off the
+   frame rather than the tap test, so a row that taps right but draws wrong
+   still fails. The pixel 3 down inside each segment (under its double
+   outline, over its lettering) is the lit fill in one segment and the unlit
+   fill in the other two. -1: no row there - all three are the page's
+   background, the pixel just left of the segments. -2: anything else. */
+static int cyd_sleep_lit(const uint16_t *fb) {
+    const int y = PG_Y(SET_SEG_Y(SET_ROW6_Y) + 3);
+    uint16_t px[3];
+    for (int k = 0; k < 3; k++) px[k] = fb[y * TANK_W + PG_X(SETP_SEG_X(k))];
+    uint16_t background = fb[y * TANK_W + PG_X(SET_SEG_X - 4)];
+    if (px[0] == background && px[1] == background && px[2] == background) return -1;
+    for (int k = 0; k < 3; k++) {
+        int other1 = (k + 1) % 3, other2 = (k + 2) % 3;
+        if (px[other1] == px[other2] && px[other1] != background && px[k] != px[other1]) return k;
+    }
+    return -2;
+}
+#endif
+
 static int selftest_sleep(void) {
     setenv("POCKET_TANK_SAVE", "/tmp/pocket-tank-selftest.sav", 1);
     char cmd[600]; snprintf(cmd, sizeof cmd, "rm -f /tmp/pocket-tank-selftest.sav"); (void)system(cmd);
@@ -1008,24 +1029,41 @@ static int selftest_sleep(void) {
 #ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
             /* (this fork) the CYD's row where the others have ROTATION is chosen
                at run time: SCREEN with no IMU (the platform applies it); with
-               one, ROTATION - tested below - and FACE DOWN under it */
+               one, ROTATION - tested below. Under it, IMU or not, SLEEP:
+               NEVER / SCREEN / LIGHT, the segment for the platform to apply;
+               a deepsleep build has no row there (render_settings_set_sleep(-1)) */
             {
                 const int row5_y = SET_ROW5_Y + 10, row6_y = SET_ROW6_Y + 10;
-                render_settings_set_imu(false, true);
+                render_settings_set_sleep(SET_SLEEP_LIGHT);
+                render_settings_set_imu(false);
                 r = SET_TAP_AT(SETP_SEG_X(1), row5_y);
                 if (r != SET_TAP_FLIP || v != 1) { printf("FAIL: SCREEN FLIPPED (no IMU) -> %d/%d\n", r, v); return 1; }
                 r = SET_TAP_AT(SETP_SEG_X(0), row5_y);
                 if (r != SET_TAP_FLIP || v != 0) { printf("FAIL: SCREEN UPRIGHT (no IMU) -> %d/%d\n", r, v); return 1; }
-                r = SET_TAP_AT(SETP_SEG_X(0), row6_y);
-                if (r != SET_TAP_NONE) { printf("FAIL: a FACE DOWN row with no IMU -> %d\n", r); return 1; }
+                for (int k = 0; k < 3; k++) {
+                    r = SET_TAP_AT(SETP_SEG_X(k), row6_y);
+                    if (r != SET_TAP_SLEEP || v != k) { printf("FAIL: SLEEP segment %d (no IMU) -> %d/%d\n", k, r, v); return 1; }
+                }
+                /* ... and drawn: the platform's choice is the segment lit */
+                for (int k = 0; k < 3; k++) {
+                    render_settings_set_sleep(k);
+                    render_settings(&tank, sfb, TANK_W, 60, 2);
+                    if (cyd_sleep_lit(sfb) != k) { printf("FAIL: SLEEP %d (no IMU) drawn with %d lit\n", k, cyd_sleep_lit(sfb)); return 1; }
+                }
+                render_settings_set_imu(true);
+                for (int k = 0; k < 3; k++) {
+                    r = SET_TAP_AT(SETP_SEG_X(k), row6_y);
+                    if (r != SET_TAP_SLEEP || v != k) { printf("FAIL: SLEEP segment %d (an IMU) -> %d/%d\n", k, r, v); return 1; }
+                }
                 render_settings(&tank, sfb, TANK_W, 60, 2);
-                render_settings_set_imu(true, true);
-                r = SET_TAP_AT(SETP_SEG_X(1), row6_y);
-                if (r != SET_TAP_FACE || v != 0) { printf("FAIL: FACE DOWN IGNORE -> %d/%d\n", r, v); return 1; }
+                if (cyd_sleep_lit(sfb) != SET_SLEEP_LIGHT) { printf("FAIL: SLEEP LIGHT (an IMU) drawn with %d lit\n", cyd_sleep_lit(sfb)); return 1; }
+                render_settings_set_sleep(-1);                                   /* a deepsleep build: no row */
                 r = SET_TAP_AT(SETP_SEG_X(0), row6_y);
-                if (r != SET_TAP_FACE || v != 1) { printf("FAIL: FACE DOWN SLEEP -> %d/%d\n", r, v); return 1; }
+                if (r != SET_TAP_NONE) { printf("FAIL: a SLEEP row on a deepsleep build -> %d\n", r); return 1; }
                 render_settings(&tank, sfb, TANK_W, 60, 2);
-                printf("selftest-sleep: the CYD's row: SCREEN with no IMU; ROTATION and FACE DOWN with one\n");
+                if (cyd_sleep_lit(sfb) != -1) { printf("FAIL: a SLEEP row drawn on a deepsleep build (%d)\n", cyd_sleep_lit(sfb)); return 1; }
+                render_settings_set_sleep(SET_SLEEP_LIGHT);
+                printf("selftest-sleep: the CYD's rows: SCREEN with no IMU, ROTATION with one; SLEEP NEVER / SCREEN / LIGHT under either, tapped and drawn, none on a deepsleep build\n");
             }
 #endif
             tank_screen_set(&tank, true);
@@ -1050,7 +1088,7 @@ static int selftest_sleep(void) {
                 printf("selftest-sleep: ROTATION: follows the tank by default, locks the way up it has (either way), saved, unlocks\n");
             }
 #ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
-            render_settings_set_imu(false, false);
+            render_settings_set_imu(false);
 #endif
 #endif
             r = SET_TAP_AT(SET_CLOSE_X + 40, SET_FOOT_Y + 10);
@@ -2524,6 +2562,14 @@ static int snapshot(const char *prefix, int seconds) {
     render_settings(&tank, fb, TANK_W, 60, 2);                     /* AUTO after 3 MIN, AUTO FEED off, the way up locked */
     snprintf(path, sizeof path, "%s_settings_auto.ppm", prefix); write_ppm(path, fb);
     tank_light_choice_set(&tank, 0); tank.autofeed_off = false; tank_orient_lock(&tank, false);
+#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+    /* (this fork) the CYD once an IMU answers: ROTATION where SCREEN was, and
+       the SLEEP row on SCREEN, the middle segment - then back as it was */
+    render_settings_set_imu(true); render_settings_set_sleep(SET_SLEEP_SCREEN);
+    render_settings(&tank, fb, TANK_W, 60, 2);
+    snprintf(path, sizeof path, "%s_settings_imu.ppm", prefix); write_ppm(path, fb);
+    render_settings_set_imu(false); render_settings_set_sleep(SET_SLEEP_LIGHT);
+#endif
     {   /* the UPDATES page and update mode's pages (2026-09-30), over the pretend radio */
         setenv("POCKET_TANK_WIFI", "/tmp/pocket-tank-snapshot-wifi.txt", 1); net_port_creds_forget();
         render_updates_page(fb, TANK_W);
@@ -4260,6 +4306,9 @@ static int selftest_card(const char *prefix) {
 }
 
 int main(int argc, char **argv) {
+#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+    render_settings_set_sleep(SET_SLEEP_LIGHT);   /* (this fork) the CYD's SLEEP row starts where the CYD's build does (sdkconfig.defaults.cyd) */
+#endif
     for (int a = 1; a < argc; a++)
         if (strcmp(argv[a], "--greedy") == 0) advisor_core_sample = false;
     for (int a = 1; a < argc; a++) {                 /* mode flags may sit anywhere */
@@ -4392,6 +4441,15 @@ int main(int argc, char **argv) {
             else if (r == SET_TAP_IDLE) printf("lights out after %d s still\n", v);
             else if (r == SET_TAP_FEED) printf("auto feed: %s\n", v ? "ON" : "OFF");
             else if (r == SET_TAP_ROTATE) printf("rotation: %s\n", v ? "LOCKED" : "unlocked");
+#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+            else if (r == SET_TAP_SLEEP) {                     /* (this fork) the CYD's SLEEP row: the firmware keeps it in NVS */
+                render_settings_set_sleep(v);
+                const char *name = "LIGHT";
+                if (v == SET_SLEEP_NEVER) name = "NEVER";
+                else if (v == SET_SLEEP_SCREEN) name = "SCREEN";
+                printf("sleep: %s\n", name);
+            }
+#endif
         } else if (updates_view && !confirm_view) {              /* the UPDATES page: CHECK, FORGET, CLOSE */
             int r = updates_page_touch((float)mx, (float)my, mpress);
             if (r == UPD_TAP_CLOSE) { updates_view = false; settings_view = true; ms_back = true; }   /* back to the settings page */

@@ -333,10 +333,10 @@ enum { SET_TAP_NONE = 0, SET_TAP_CLOSE = 1, SET_TAP_BRIGHT = 2, SET_TAP_VOLUME =
        SET_TAP_FEED = 8,        /* AUTO FEED (0.3.2): *value 1 = ON; applied and marked for the save */
        SET_TAP_ROTATE = 9,      /* ROTATION (0.3.2): *value 1 = locked; applied and marked for the save */
        SET_TAP_FLIP = 10,       /* this fork, the CYD with no IMU: SCREEN UPRIGHT / FLIPPED (below) */
-       SET_TAP_FACE = 11 };     /* this fork, the CYD with an IMU: FACE DOWN SLEEP / IGNORE (below) */
+       SET_TAP_SLEEP = 11 };    /* this fork, the CYD not built for deepsleep: SLEEP NEVER / SCREEN / LIGHT (below) */
 /* (this fork) the platforms test these in if-chains, not a switch, so two
    equal values would compile without a word: the CYD's stay past upstream's */
-_Static_assert(SET_TAP_FLIP > SET_TAP_ROTATE && SET_TAP_FLIP > SET_TAP_SCREEN && SET_TAP_FLIP > SET_TAP_UPDATES && SET_TAP_FACE > SET_TAP_FLIP,
+_Static_assert(SET_TAP_FLIP > SET_TAP_ROTATE && SET_TAP_FLIP > SET_TAP_SCREEN && SET_TAP_FLIP > SET_TAP_UPDATES && SET_TAP_SLEEP > SET_TAP_FLIP,
                "the CYD's settings taps must not reuse upstream's numbers");
 /* The CYD's own rows (this fork; the CYD only - no other board draws them).
  * With no IMU to turn the picture, the row where the others have ROTATION is
@@ -345,11 +345,18 @@ _Static_assert(SET_TAP_FLIP > SET_TAP_ROTATE && SET_TAP_FLIP > SET_TAP_SCREEN &&
  * is here so the row shows it. */
 void render_settings_set_flip(bool flipped);
 /* Once an IMU answers, it turns the picture itself: that row is upstream's
- * ROTATION, and a row under it is FACE DOWN, SLEEP / IGNORE - the face-down
- * gesture's switch. SET_TAP_FACE carries *value 1 = SLEEP. The platform says
- * whether an IMU answered and what the switch is. The choice is made at run
- * time, where upstream picks SCREEN or ROTATION by the board (TANK_WORN). */
-void render_settings_set_imu(bool imu, bool face_sleep);
+ * ROTATION. The platform says whether an IMU answered. The choice is made at
+ * run time, where upstream picks SCREEN or ROTATION by the board (TANK_WORN). */
+void render_settings_set_imu(bool imu);
+/* Under it, IMU or not, the SLEEP row (2026-10-08): what every way into sleep
+ * does - BOOT's short press, the face-down gesture, the PWR key, the
+ * director's sleeps. NEVER ignores them all, SCREEN goes dark with the chip
+ * awake, LIGHT goes dark and light-sleeps between its looks at the glass.
+ * SET_TAP_SLEEP carries *value = the segment, SET_SLEEP_*; the platform
+ * applies it, keeps it, and says what it is here. -1 draws no row: a build
+ * for deepsleep, which is a build choice only and has none to offer. */
+enum { SET_SLEEP_NEVER = 0, SET_SLEEP_SCREEN = 1, SET_SLEEP_LIGHT = 2 };   /* the row's order, left to right; the firmware stores these numbers */
+void render_settings_set_sleep(int choice);
 void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, int volume);
 int  render_settings_tap(float x, float y, int *value);
 int  render_settings_touch(tank_t *t, float x, float y, bool down, int *value);
@@ -702,9 +709,9 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
 #define SHP_ARROW_X0  (SHP_ARROW_X1 - SHP_ARROW_W - UI(8))         /* previous */
 /* settings at a 28 px pitch, which fills the glass with no slack: the title,
    BRIGHTNESS, VOLUME, the note, LIGHTS OUT, AUTO FEED, then the row chosen at
-   run time - SCREEN with no IMU, or ROTATION and FACE DOWN under it with one
-   (render_settings_set_imu) - and the foot: CLOSE, the version line beside
-   it. No UPDATES: the CYD has no update channel (docs/CYD.md). */
+   run time - SCREEN with no IMU, ROTATION with one (render_settings_set_imu) -
+   SLEEP under it on every build but deepsleep (render_settings_set_sleep),
+   and the foot: CLOSE, the version line beside it. No UPDATES: the CYD has no update channel (docs/CYD.md). */
 #undef  SET_TITLE_Y
 #define SET_TITLE_Y   6
 #undef  SET_ROW1_Y
@@ -719,7 +726,7 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
 #define SET_ROW4_Y    132            /* AUTO FEED */
 #undef  SET_ROW5_Y
 #define SET_ROW5_Y    160            /* SCREEN (no IMU) or ROTATION (an IMU) */
-#define SET_ROW6_Y    188            /* FACE DOWN (an IMU) */
+#define SET_ROW6_Y    188            /* SLEEP (not on a deepsleep build) */
 #undef  SET_LABEL_X
 #define SET_LABEL_X   CYD_GLASS_X(8)
 #undef  SET_SEG_X

@@ -34,6 +34,7 @@
 #include "esp_ota_ops.h"
 #include "brightness.h"
 #include "orientation.h"
+#include "sleep_setting.h"                 /* (this fork) the CYD's SLEEP row: SLEEP_SETTING_ROW */
 #include "batlog.h"
 #include "codec_port.h"
 #include "progression.h"
@@ -53,7 +54,7 @@
 #include "driver/gpio.h"
 #include "esp_sleep.h"
 #include "driver/rtc_io.h"
-#if CONFIG_POCKET_TANK_SLEEP_LIGHT
+#if CONFIG_POCKET_TANK_SLEEP_LIGHT || SLEEP_SETTING_ROW
 #include "driver/usb_serial_jtag.h"         /* usb_serial_jtag_is_connected: the dark stays awake for a USB host */
 #include "board_pins.h"                     /* the outputs the dark holds through light sleep (dark_hold_pins) */
 #endif
@@ -91,6 +92,22 @@ static const char *s_sleep_why = "?";      /* what asked for the next sleep, for
 #else
 #define SLEEP_MODE_NAME "deepsleep"
 #define SLEEP_MODE_DEEP 1
+#endif
+/* (this fork) the CYD's SLEEP row (sleep_setting.h, 2026-10-08): on a CYD
+ * built for none, screen or lightsleep the mode is the keeper's, chosen at
+ * run time, and the build's mode only its factory default. The dark is
+ * compiled for every such build - one built for none too, since SCREEN and
+ * LIGHT are a tap away - and the tests of the build's mode below become
+ * tests of the choice. The name in the log lines is the choice's. */
+#ifdef SLEEP_SETTING_ROW
+static const char *sleep_mode_name(void) {
+    int choice = sleep_setting();
+    if (choice == SET_SLEEP_NEVER) return "never";
+    if (choice == SET_SLEEP_SCREEN) return "screen";
+    return "lightsleep";
+}
+#undef  SLEEP_MODE_NAME
+#define SLEEP_MODE_NAME sleep_mode_name()
 #endif
 #if defined(CONFIG_POCKET_TANK_DISPLAY_SH8601) || defined(CONFIG_POCKET_TANK_DISPLAY_ILI9341)
 extern i2c_master_bus_handle_t board_i2c_bus(void);
@@ -137,7 +154,7 @@ static void assert_plan(void) {
 
 static void enter_poweroff(void);
 static void deep_sleep_now(int wake_after_s);
-#if CONFIG_POCKET_TANK_SLEEP_SCREEN || CONFIG_POCKET_TANK_SLEEP_LIGHT
+#if CONFIG_POCKET_TANK_SLEEP_SCREEN || CONFIG_POCKET_TANK_SLEEP_LIGHT || SLEEP_SETTING_ROW
 static void enter_dark(int wake_after_s, bool by_face);
 #endif
 static bat_t s_bh;                          /* the battery page's history: NVS "bat"/"hist" (its own namespace - a tank reset leaves it) */
@@ -328,9 +345,18 @@ static void enter_sleep_for(int wake_after_s) {
     /* any sleep that starts face down - the gesture's, or BOOT pressed while
        it lies there - wakes when it is turned face up. A BOOT sleep face up
        keeps BOOT as its only wake: "not face down" would be true at once. */
-    if (!by_face && orientation_face_sleep() && imu_port_face_down_now() == 1) by_face = true;
+    if (!by_face && imu_port_face_down_now() == 1) by_face = true;
 #endif
-#if CONFIG_POCKET_TANK_SLEEP_NONE
+#ifdef SLEEP_SETTING_ROW
+    /* (this fork) the CYD: what the SLEEP row says - NEVER is the none mode's
+       line, SCREEN and LIGHT the dark (which of the two, it asks itself) */
+    if (sleep_setting() == SET_SLEEP_NEVER) {
+        ESP_LOGI(TAG, "sleep (%s) ignored: the SLEEP row says NEVER, so the tank never goes dark", s_sleep_why);
+        return;
+    }
+    enter_dark(wake_after_s, by_face);         /* never the stages below: no deep sleep, no power-off */
+    return;
+#elif CONFIG_POCKET_TANK_SLEEP_NONE
     ESP_LOGI(TAG, "sleep (%s) ignored: the sleep mode is none, so the tank never goes dark", s_sleep_why);
     return;
 #elif CONFIG_POCKET_TANK_SLEEP_SCREEN || CONFIG_POCKET_TANK_SLEEP_LIGHT
@@ -468,7 +494,7 @@ static void deep_sleep_now(int wake_after_s) {
     esp_deep_sleep_start();
 }
 
-#if CONFIG_POCKET_TANK_SLEEP_SCREEN || CONFIG_POCKET_TANK_SLEEP_LIGHT
+#if CONFIG_POCKET_TANK_SLEEP_SCREEN || CONFIG_POCKET_TANK_SLEEP_LIGHT || SLEEP_SETTING_ROW
 /* The dark (2026-10-08): the screen and lightsleep modes' sleep, with no
  * deep sleep after it. The CYD in its case cannot reach BOOT, and deep sleep
  * hears nothing else, so once the grace ran out the tank stayed dark for
@@ -485,10 +511,11 @@ static void deep_sleep_now(int wake_after_s) {
  *    is its wake - turned over or picked up - as it was in the grace, but
  *    on two reads in a row, where the grace took one.
  *  - BOOT, the PMIC's PWR key, or the director's timer (`deepsleep N`).
- * It looks every DARK_SLICE_US. In lightsleep the chip light-sleeps between
- * looks, woken early by BOOT or the touch controller's INT line; in screen -
- * and in lightsleep while a USB host is attached, since light sleep takes
- * the USB port down and the bench would lose the log - it waits awake. The
+ * It looks every DARK_SLICE_US. In lightsleep (on the CYD, the SLEEP row's
+ * LIGHT) the chip light-sleeps between looks, woken early by BOOT or the
+ * touch controller's INT line; in screen (SCREEN) - and in lightsleep while
+ * a USB host is attached, since light sleep takes the USB port down and the
+ * bench would lose the log - it waits awake. The
  * dark is lived through at the wake as a deep sleep is: progression_slept,
  * growth at a quarter and the full-night badge. Nothing ticks in it and the
  * tank task clamps its next frame's dt, so it is counted once. */
@@ -496,7 +523,17 @@ static void deep_sleep_now(int wake_after_s) {
 #define DARK_SLOW_EVERY 2           /* the IMU and the PWR key every second look: ~5 a second (awake the IMU is read 4) */
 #define DARK_FACE_UP_READS 2        /* a dark begun face down: not face down on this many IMU reads in a row, 0.2 s apart */
 
-#if CONFIG_POCKET_TANK_SLEEP_LIGHT
+#if CONFIG_POCKET_TANK_SLEEP_LIGHT || SLEEP_SETTING_ROW
+/* whether the dark light-sleeps between its looks: always in a lightsleep
+   build; (this fork) on the CYD, when the SLEEP row says LIGHT - SCREEN
+   waits awake, as the screen build does */
+static bool dark_light_sleeps(void) {
+#ifdef SLEEP_SETTING_ROW
+    return sleep_setting() == SET_SLEEP_LIGHT;
+#else
+    return true;
+#endif
+}
 /* Light sleep isolates every pad not armed as a wake (ESP-IDF's
  * ESP_SLEEP_GPIO_RESET_WORKAROUND, on for the S3): input, output and pulls
  * off, so for each slice an output is left to whatever resistor the board
@@ -520,10 +557,11 @@ static void dark_hold_pins(bool hold) {
 }
 #endif
 
-/* one wait between looks: light sleep (lightsleep, no USB host), or awake */
-static void dark_wait(int64_t us, int touch_int) {
-#if CONFIG_POCKET_TANK_SLEEP_LIGHT
-    if (!usb_serial_jtag_is_connected()) {
+/* one wait between looks: light sleep (light, the dark's own answer from
+   dark_light_sleeps, and no USB host), or awake */
+static void dark_wait(int64_t us, int touch_int, bool light) {
+#if CONFIG_POCKET_TANK_SLEEP_LIGHT || SLEEP_SETTING_ROW
+    if (light && !usb_serial_jtag_is_connected()) {
         gpio_wakeup_enable(BTN_SLEEP, GPIO_INTR_LOW_LEVEL);      /* released: the loop checks it every look */
         /* the touch INT only while it idles high: a level wake that already
            holds would end every slice at once */
@@ -539,7 +577,7 @@ static void dark_wait(int64_t us, int touch_int) {
         /* refused (a wake already pending): wait awake this once, never spin */
     }
 #else
-    (void)touch_int;
+    (void)touch_int; (void)light;
 #endif
     TickType_t ticks = pdMS_TO_TICKS(us / 1000);
     vTaskDelay(ticks > 0 ? ticks : 1);
@@ -558,16 +596,22 @@ static void enter_dark(int wake_after_s, bool by_face) {
     vTaskDelay(pdMS_TO_TICKS(30));
     imu_port_rest_begin();
     int touch_int = by_face ? -1 : touch_port_wake_gpio();
-#if CONFIG_POCKET_TANK_SLEEP_LIGHT
-    const char *usb = usb_serial_jtag_is_connected() ? ", awake while a USB host is attached" : "";
+    /* whether this dark light-sleeps, asked once: the pins it holds at the
+       start are the pins it lets go at the end, whatever the SLEEP row says
+       by then. (this fork) On the CYD a change of the row takes effect at
+       the next sleep. */
+#if CONFIG_POCKET_TANK_SLEEP_LIGHT || SLEEP_SETTING_ROW
+    bool light = dark_light_sleeps();
+    const char *usb = light && usb_serial_jtag_is_connected() ? ", awake while a USB host is attached" : "";
 #else
+    bool light = false;
     const char *usb = "";
 #endif
     ESP_LOGI(TAG, "dark (%s, %s%s): wakes on %s, BOOT%s | battery %d%% %d mV",
              s_sleep_why, SLEEP_MODE_NAME, usb, by_face ? "face up" : "a touch, motion",
              wake_after_s > 0 ? ", the timer" : "", pct0, mv0);
-#if CONFIG_POCKET_TANK_SLEEP_LIGHT
-    dark_hold_pins(true);                       /* touch reset, amp and backlight keep their level in each slice */
+#if CONFIG_POCKET_TANK_SLEEP_LIGHT || SLEEP_SETTING_ROW
+    if (light) dark_hold_pins(true);            /* touch reset, amp and backlight keep their level in each slice */
 #endif
     int64_t t0 = esp_timer_get_time();
     int64_t until = wake_after_s > 0 ? t0 + (int64_t)wake_after_s * 1000000 : 0;
@@ -578,7 +622,7 @@ static void enter_dark(int wake_after_s, bool by_face) {
     for (int look = 1; ; look++) {
         int64_t now = esp_timer_get_time();
         if (until && now >= until) { why = "the timer"; break; }
-        dark_wait(until && until - now < DARK_SLICE_US ? until - now : DARK_SLICE_US, touch_int);
+        dark_wait(until && until - now < DARK_SLICE_US ? until - now : DARK_SLICE_US, touch_int, light);
         if (!gpio_get_level(BTN_SLEEP)) { why = "BOOT"; break; }
         if (!by_face) {
             if (!touch_port_finger_now()) glass_clear = true;
@@ -601,8 +645,8 @@ static void enter_dark(int wake_after_s, bool by_face) {
             if (moved) { why = "motion"; break; }
         }
     }
-#if CONFIG_POCKET_TANK_SLEEP_LIGHT
-    dark_hold_pins(false);
+#if CONFIG_POCKET_TANK_SLEEP_LIGHT || SLEEP_SETTING_ROW
+    if (light) dark_hold_pins(false);
 #endif
     while (!gpio_get_level(BTN_SLEEP)) vTaskDelay(pdMS_TO_TICKS(10));   /* a BOOT wake press, still down */
     float dark_s = (esp_timer_get_time() - t0) / 1e6f;
@@ -624,7 +668,7 @@ void device_sleep(int wake_after_s) { s_sleep_why = "the director"; enter_sleep_
  * grace ends in). No PMIC: deep sleep. */
 static void enter_poweroff(void) {
 #ifndef SLEEP_MODE_DEEP
-    enter_sleep_for(0);   /* none: ignored there, with its line; screen, lightsleep: the dark, as any sleep */
+    enter_sleep_for(0);   /* none (the CYD: NEVER): ignored there, with its line; screen, lightsleep: the dark, as any sleep */
     return;
 #endif
     ESP_LOGI(TAG, "power-off now: saving tank, PMIC soft cut (the PWR key boots)");
@@ -790,6 +834,7 @@ static void reset_tank(void) {
     notice_sync(&tank);                         /* a fresh tank has nothing to announce */
     brightness_save();                          /* the erase took the setting with it */
     orientation_save();                         /* ... and this one */
+    sleep_setting_save();                       /* ... and the SLEEP row's, if the keeper chose one (this fork) */
     ESP_LOGI(TAG, "fresh tank: %s + %s, both fry", tank.fish[0].name, tank.fish[1].name);
     setup_begin(&tank);                         /* welcome, names, colours - as on a fresh install */
 }
@@ -824,9 +869,10 @@ static void tank_task(void *arg) {
         if (imu_port_moving()) audio_port_prewarm();   /* in a hand: the codec stays warm (docs/AUDIO.md) */
         if (imu_port_handled()) tank_handled(&tank);   /* ... and the light stays on (two polls of motion: a bump on the desk is not a pick-up) */
 #if CONFIG_POCKET_TANK_IMU_FACE_DOWN_SLEEP
-        /* screen down and still for 2 s: the sleep key, if the keeper allows
-           it. Taken either way, so switching it on later fires nothing stale. */
-        if (imu_port_take_face_down() && orientation_face_sleep()) {
+        /* screen down and still for 2 s: the sleep key. What it does is the
+           sleep mode's - on the CYD the SLEEP row's, where NEVER ignores it
+           with its line, as it does every other way into sleep. */
+        if (imu_port_take_face_down()) {
 #ifdef SLEEP_MODE_DEEP
             ESP_LOGI(TAG, "face down: sleeping (face up wakes it within the grace)");
 #endif
@@ -835,7 +881,7 @@ static void tank_task(void *arg) {
             enter_sleep();
         }
         /* with an IMU answering, the IMU turns the picture and the settings
-           row is FACE DOWN, not SCREEN: a saved SCREEN choice is set aside */
+           row is ROTATION, not SCREEN: a saved SCREEN choice is set aside */
         bool live = s_imu ? imu_port_inverted() : orientation_flipped();
 #else
         bool live = imu_port_inverted() != orientation_flipped();   /* the IMU's flip, turned again by the keeper's SCREEN choice */
@@ -872,7 +918,7 @@ static void tank_task(void *arg) {
           else if (w == SET_TAP_FEED) ESP_LOGI(TAG, "settings: auto feed %s", v ? "ON" : "OFF (the keeper feeds; a starving fish loses trust)");
           else if (w == SET_TAP_ROTATE) ESP_LOGI(TAG, "settings: rotation %s", v ? (tank.orient_inv ? "LOCKED (turned over)" : "LOCKED (upright)") : "unlocked (the picture follows the tank)");
           else if (w == SET_TAP_FLIP) orientation_set(v != 0);              /* the CYD's SCREEN row (no IMU) */
-          else if (w == SET_TAP_FACE) orientation_set_face_sleep(v != 0); } /* the CYD's FACE DOWN row (an IMU) */
+          else if (w == SET_TAP_SLEEP) sleep_setting_set(v); }              /* the CYD's SLEEP row: NEVER / SCREEN / LIGHT */
         if (touch_port_take_update() == UPD_TAP_CHECK) request_update();   /* the updates page's CHECK: save, restart into update mode */
         { int r = touch_port_take_shop();                               /* the shop's UNLOCK / MOVE / SELL */
           if (r >= SHOP_TAP_SELL) {                                     /* sold back: the refund, the piece gone, the row for sale again */
@@ -938,11 +984,12 @@ static void tank_task(void *arg) {
             } else if (touch_port_settings()) {  /* settings page: brightness + volume */
 #if CONFIG_POCKET_TANK_BOARD_CYD_320X240
                 /* the CYD's row is chosen at run time (common/render.h): SCREEN with
-                   no IMU, ROTATION and FACE DOWN with one */
+                   no IMU, ROTATION with one; SLEEP under it, but not on a deepsleep build */
                 render_settings_set_flip(orientation_flipped());
 #if CONFIG_POCKET_TANK_IMU_FACE_DOWN_SLEEP
-                render_settings_set_imu(s_imu, orientation_face_sleep());
+                render_settings_set_imu(s_imu);
 #endif
+                render_settings_set_sleep(sleep_setting());   /* -1 on a deepsleep build: no row */
 #endif
                 render_settings(&tank, fb[cur], TANK_W, brightness_level(), audio_port_volume());
                 sel = -1;
@@ -1128,6 +1175,10 @@ void app_main(void) {
       if (carried) ESP_LOGI(TAG, "batlog: %d samples carried through the reset (director `batlog` reads them)", carried); }
     brightness_init();
     orientation_init();
+    sleep_setting_init();                    /* (this fork) the CYD's SLEEP row */
+#ifdef SLEEP_SETTING_ROW
+    ESP_LOGI(TAG, "sleep mode: %s (%s)", SLEEP_MODE_NAME, sleep_setting_saved() ? "chosen in settings" : "the build's default, nothing chosen in settings");
+#endif
     bat_hist_load();
     assert_plan();
     for (int i = 0; i < PLAN_FB_COUNT; i++) {

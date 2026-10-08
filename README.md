@@ -710,12 +710,13 @@ are the AMOLED board's too; face down is the CYD's.
 | hold BOOT and tap the glass | the *Reset tank?* prompt |
 | double-tap the glass | the tank light on or off (LIGHTS OUT: MANUAL, the default) |
 
-The settings page's FACE DOWN row (SLEEP / IGNORE) switches the face-down
-sleep and its wake off; it takes the place of the SCREEN row once an IMU
-answers. The CYD never deep-sleeps - its case covers BOOT: asleep it is
-dark and light-sleeping for as long as it takes, the time lived through at
-the wake. The build's sleep mode decides that (none, screen, lightsleep or
-deepsleep, the AMOLED's): [docs/CYD.md](docs/CYD.md), *Sleep*.
+The settings page's SLEEP row decides what every way into sleep does, face
+down included: NEVER ignores them all, SCREEN darkens the glass with the
+chip awake, and LIGHT, the shipped default, darkens it and light-sleeps.
+The CYD as shipped never deep-sleeps - its case covers BOOT: asleep it is
+dark for as long as it takes, the time lived through at the wake. The
+build's sleep mode is only the row's factory default, and deepsleep, the
+AMOLED's, a build choice with no row: [docs/CYD.md](docs/CYD.md), *Sleep*.
 
 Back up the factory image before the first flash
 (`esptool.py --chip esp32s3 -p <port> -b 921600 read_flash 0 0x1000000 factory_16MB.bin`)

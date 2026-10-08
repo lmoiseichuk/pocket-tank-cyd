@@ -3608,15 +3608,17 @@ static const char *const SET_FEED[2]   = { "ON", "OFF" };          /* the defaul
 static const char *const SET_SCREEN[2] = { "NORMAL", "TURNED" };   /* the default first */
 #endif
 /* this fork, the CYD: the row where the others have ROTATION is chosen at
-   run time (render.h, SET_TAP_FLIP / SET_TAP_FACE) */
+   run time (render.h, SET_TAP_FLIP), and the SLEEP row under it (SET_TAP_SLEEP) */
 #ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
 static const char *const SET_FLIP[2] = { "UPRIGHT", "FLIPPED" };
-static const char *const SET_FACE[2] = { "SLEEP", "IGNORE" };    /* the default first */
+static const char *const SET_SLEEP[3] = { "NEVER", "SCREEN", "LIGHT" };   /* SET_SLEEP_*'s order */
 #endif
 static bool g_set_flipped;                                       /* the SCREEN row's state, from the platform */
-static bool g_set_imu, g_set_face;                               /* an IMU answered; the face-down switch */
+static bool g_set_imu;                                           /* an IMU answered */
+static int g_set_sleep = -1;                                     /* the SLEEP row's choice, SET_SLEEP_*; -1: no row (deepsleep) */
 void render_settings_set_flip(bool flipped) { g_set_flipped = flipped; }
-void render_settings_set_imu(bool imu, bool face_sleep) { g_set_imu = imu; g_set_face = face_sleep; }
+void render_settings_set_imu(bool imu) { g_set_imu = imu; }
+void render_settings_set_sleep(int choice) { g_set_sleep = choice; }
 
 static void set_row(ctx_t *c, int row_y, const char *label, const char *const names[], int n, int chosen) {
     draw_text(c, SET_LABEL_X, row_y, UI_TEXT(2), MSP_TEAL, label);
@@ -3718,8 +3720,9 @@ void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, 
         draw_text(&c, SET_ROT_WORD_X, SET_ROW5_Y, UI_TEXT(2), t->orient_lock ? 0xffffff : MSP_DIM, t->orient_lock ? "LOCKED" : "UNLOCKED");
     }
 #ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
-    /* (this fork) with an IMU, the face-down gesture's switch under it */
-    if (g_set_imu) set_row(&c, SET_ROW6_Y, "FACE DOWN", SET_FACE, 2, g_set_face ? 0 : 1);
+    /* (this fork) the SLEEP row under it, IMU or not: what the ways into
+       sleep do. A deepsleep build has no choice to offer and no row. */
+    if (g_set_sleep >= 0) set_row(&c, SET_ROW6_Y, "SLEEP", SET_SLEEP, 3, g_set_sleep);
 #endif
 #endif
     /* the firmware version, hugging the bottom left of the frame (6 px up,
@@ -3774,15 +3777,15 @@ int render_settings_tap(float x, float y, int *value) {
     if (y >= SET_SEG_Y(SET_ROW3_Y) - UI(12) && y < SET_SEG_Y(SET_ROW4_Y) - UI(12)) { if (seg < 0) return SET_TAP_NONE; *value = 0; return x < SET_SPAN_MID ? SET_HIT_LIGHT_PREV : SET_HIT_LIGHT_NEXT; }
     if (y >= SET_SEG_Y(SET_ROW4_Y) - UI(12) && y < SET_SEG_Y(SET_ROW5_Y) - UI(12)) { if (two < 0) return SET_TAP_NONE; *value = two == 0; return SET_TAP_FEED; }
 #ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
-    /* (this fork) the CYD: SCREEN (no IMU) or ROTATION, then FACE DOWN (an IMU) */
+    /* (this fork) the CYD: SCREEN (no IMU) or ROTATION, then SLEEP (not deepsleep) */
     if (y >= SET_SEG_Y(SET_ROW5_Y) - UI(12) && y < SET_SEG_Y(SET_ROW6_Y) - UI(12)) {
         if (two < 0) return SET_TAP_NONE;
         if (!g_set_imu) { *value = two == 1; return SET_TAP_FLIP; }
         *value = 0; return SET_TAP_ROTATE;
     }
     if (y >= SET_SEG_Y(SET_ROW6_Y) - UI(12) && y < SET_FOOT_Y - UI(4)) {
-        if (two < 0 || !g_set_imu) return SET_TAP_NONE;
-        *value = two == 0; return SET_TAP_FACE;  /* SLEEP is the first segment */
+        if (seg < 0 || g_set_sleep < 0) return SET_TAP_NONE;
+        *value = seg; return SET_TAP_SLEEP;      /* three segments, as BRIGHTNESS: SET_SLEEP_* */
     }
 #else
     if (y >= SET_SEG_Y(SET_ROW5_Y) - 12 && y < SET_FOOT_Y - 4) {
@@ -3823,7 +3826,7 @@ int render_settings_touch(tank_t *t, float x, float y, bool down, int *value) {
                 if ((v != 0) != t->screen_turned) { tank_screen_set(t, v != 0); progression_settings_changed(); }
                 r = SET_TAP_SCREEN; *value = v;
             } else if (h == SET_TAP_CLOSE || h == SET_TAP_BRIGHT || h == SET_TAP_VOLUME || h == SET_TAP_UPDATES
-                       || h == SET_TAP_FLIP || h == SET_TAP_FACE) { r = h; *value = v; }   /* FLIP, FACE: the CYD's, the platform's to apply */
+                       || h == SET_TAP_FLIP || h == SET_TAP_SLEEP) { r = h; *value = v; }   /* FLIP, SLEEP: the CYD's, the platform's to apply */
         }
     }
     s_down = down;
