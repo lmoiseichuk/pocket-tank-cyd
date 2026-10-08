@@ -546,6 +546,10 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
 #define SHP_ROW_X     32             /* a shop row's art (the rows' own column: render.c) */
 #define SHP_TEXT_X    76             /* ... and its name and price */
 #define SHP_BTN_DY    ((SHP_ROW_ICON - SHP_BTN_H) / 2)   /* a row's button, centred on its art */
+#define MSP_RULE_X0   24             /* the milestones' and the shop's dividers run from here ... */
+#define MSP_RULE_X1   (PAGE_W - 24)  /* ... to here */
+#define MSP_HIT_X0    20             /* a row's taps start here: the milestones' portraits and names, the shop's rows */
+#define MSP_TANK_BADGE 4             /* the tank row's badges and page arrow: their top, under MSP_TANK_Y */
 
 /* ---- this fork: the 2.8" CYD (TANK_CYD, 320 x 240). The modals, the
  * notices, the prompts and the setup flow are the design scaled (ui.h), on a
@@ -604,6 +608,17 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
 #define MSP_UPG_W     96
 #undef  MSP_TPG_X
 #define MSP_TPG_X     CYD_GLASS_X(292)  /* the tank row's page arrow: glass x 296..312, right of the sixth badge */
+#undef  MSP_TANK_BADGE
+#define MSP_TANK_BADGE 2             /* as in a fish row */
+/* the dividers and the rows' left tap edge, on the glass as the columns are
+   (on the page they would start 14 px further in: glass x 30, not 16, and a
+   shop row would answer only from x 27, not 13, though its art starts at 8) */
+#undef  MSP_RULE_X0
+#define MSP_RULE_X0   CYD_GLASS_X(UI(24))            /* glass x 16 .. */
+#undef  MSP_RULE_X1
+#define MSP_RULE_X1   CYD_GLASS_X(TANK_W - UI(24))   /* .. 303 */
+#undef  MSP_HIT_X0
+#define MSP_HIT_X0    CYD_GLASS_X(UI(20))            /* glass x 13 */
 /* the modals: the design, scaled and centred on the page */
 #undef  MSP_MODAL_X
 #define MSP_MODAL_X   UI(56)

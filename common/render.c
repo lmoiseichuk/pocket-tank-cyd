@@ -3079,7 +3079,7 @@ void render_milestones(const tank_t *t, uint16_t *fb, int stride) {
     }
     /* the tank's row: the sand dollar at the left (the fish rows' portrait
        slot) opens the shop (2026-09-15) */
-    for (int x = UI(24); x < PAGE_W - UI(24); x++) px_blend(&c, x, MSP_TANK_Y - UI(4), MSP_DIM, 200);
+    for (int x = MSP_RULE_X0; x < MSP_RULE_X1; x++) px_blend(&c, x, MSP_TANK_Y - UI(4), MSP_DIM, 200);
     blit_icon(&c, MSP_SD_X, MSP_TANK_Y, badge_art(&icon_ms_sand_dollar), 255);
     {   /* the balance under the coin (Strato, 2026-09-15), centred on it - the
            only room: the divider and the last row sit above, 12 px to the left */
@@ -3095,7 +3095,7 @@ void render_milestones(const tank_t *t, uint16_t *fb, int stride) {
         int k = g_ms_tpage * MSP_PER_ROW + j;
         if (k >= nb) break;
         const badge_t *tb = tank_badge(t, k);
-        badge(&c, MSP_BADGE_X0 + j * MSP_BADGE_DX, MSP_TANK_Y + UI(4), tb->icon,
+        badge(&c, MSP_BADGE_X0 + j * MSP_BADGE_DX, MSP_TANK_Y + MSP_TANK_BADGE, tb->icon,
               (t->tank_ms_bits & tb->bit) != 0, (t->tank_ms_seen & tb->bit) == 0);
     }
     if (np > 1) {   /* the page arrow: toward the next page, back from the last; the badges' two-tone
@@ -3103,7 +3103,7 @@ void render_milestones(const tank_t *t, uint16_t *fb, int stride) {
         bool last = g_ms_tpage == np - 1, fresh = false;
         for (int k = 0; k < nb; k++)
             if (k / MSP_PER_ROW != g_ms_tpage && (t->tank_ms_bits & ~t->tank_ms_seen & tank_badge(t, k)->bit)) fresh = true;
-        int ax = MSP_TPG_X + 4, ay = MSP_TANK_Y + UI(4), aw = 16;
+        int ax = MSP_TPG_X + 4, ay = MSP_TANK_Y + MSP_TANK_BADGE, aw = 16;
         ms_chevron(&c, last ? ax + 2 : ax + aw - 2, ay + MSP_ICON / 2, last, 0xffffff);
         if (fresh) { rect_edge(&c, ax - 3, ay - 3, aw + 6, MSP_ICON + 6, MSP_TEAL);
                      rect_edge(&c, ax - 4, ay - 4, aw + 8, MSP_ICON + 8, 0x3f6a72); }
@@ -3254,7 +3254,7 @@ int render_milestones_tap(const tank_t *t, float x, float y) {
     if (x >= MSP_BADGE_X0 - UI(4) && x < MSP_BADGE_X0 + 6 * MSP_BADGE_DX) {
         k = (int)((x - MSP_BADGE_X0 + UI(4)) / MSP_BADGE_DX);
         if (k > 5) k = 5;
-    } else if (x >= UI(20) && x < MSP_BADGE_X0 - UI(4)) k = -1;
+    } else if (x >= MSP_HIT_X0 && x < MSP_BADGE_X0 - UI(4)) k = -1;
     else return MS_TAP_NONE;
     if (tank_row && x < MSP_NAME_X - UI(4)) return MS_TAP_SHOP;      /* the sand dollar: the shop page */
     if (tank_row && k >= 0) {                        /* this page's badge; an empty cell on the last page is nothing */
@@ -3463,7 +3463,7 @@ void render_shop(const tank_t *t, uint16_t *fb, int stride) {
     draw_text(&c, SHP_HEAD_X, SHP_COIN_Y + UI(6), UI_TEXT(2), MSP_TEAL, "SAND DOLLARS");
     char bal[16]; snprintf(bal, sizeof bal, "%d", (int)t->sd_balance);
     draw_text(&c, SHP_HEAD_X, SHP_COIN_Y + UI(28), UI_TEXT(4), 0xffffff, bal);
-    for (int x = UI(24); x < PAGE_W - UI(24); x++) px_blend(&c, x, SHP_ROW_Y0 - UI(10), MSP_DIM, 200);
+    for (int x = MSP_RULE_X0; x < MSP_RULE_X1; x++) px_blend(&c, x, SHP_ROW_Y0 - UI(10), MSP_DIM, 200);
     if (SHP_PAGES > 1) {
         shop_arrow(&c, SHP_ARROW_X0, SHP_ARROW_Y, false, g_shp_page > 0 ? MSP_TEAL : MSP_DIM);
         shop_arrow(&c, SHP_ARROW_X1, SHP_ARROW_Y, true, g_shp_page < SHP_PAGES - 1 ? MSP_TEAL : MSP_DIM);
@@ -3561,7 +3561,7 @@ int render_shop_tap(const tank_t *t, float x, float y) {
     }
     for (int i = g_shp_page * SHP_PER_PAGE; i < SD_ITEM_COUNT && i < (g_shp_page + 1) * SHP_PER_PAGE; i++) {
         int top = SHP_ROW_Y0 + (i - g_shp_page * SHP_PER_PAGE) * SHP_ROW_DY;
-        if (x >= UI(20) && y >= top - UI(8) && y < top + SHP_ROW_DY - UI(8)) { g_shp_modal = i; return SHOP_TAP_KEPT; }
+        if (x >= MSP_HIT_X0 && y >= top - UI(8) && y < top + SHP_ROW_DY - UI(8)) { g_shp_modal = i; return SHOP_TAP_KEPT; }
     }
     return SHOP_TAP_NONE;
 }
