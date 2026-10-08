@@ -16,7 +16,7 @@ SDL_LIBS   := $(shell sdl2-config --libs)
 # `make ROUND=1`: the round 466 px bowl (the Waveshare 1.75C's world) as
 # ./fishsim-round, built beside the rectangle's in build-round/.
 # `make WATCH=1`: the watch's 410 x 502 portrait tank (the Waveshare 2.06) as ./fishsim-watch
-# `make BOARD_CYD_320X240=1` (this fork): a CYD's 320 x 240 tank (docs/CYD.md) as
+# `make BOARD_CYD_320X240=1` (this fork): a CYD's 320 x 240 tank (CYD.md) as
 # ./fishsim-cyd_320x240 - the firmware's Kconfig name, so common/ tests one symbol
 ifdef ROUND
 BUILD   := build-round

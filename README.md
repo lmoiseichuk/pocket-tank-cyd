@@ -504,7 +504,7 @@ cd sim && make && ./fishsim
 
 On macOS the Makefile targets x86_64 by default to match an Intel Homebrew
 SDL2; use `make ARCH=` for a native build.  On Linux it builds for the host.
-`make BOARD_CYD_320X240=1` builds `fishsim-cyd_320x240`, the tank at a CYD's 320 x 240 ([docs/CYD.md](docs/CYD.md)). 
+`make BOARD_CYD_320X240=1` builds `fishsim-cyd_320x240`, the tank at a CYD's 320 x 240 ([CYD.md](CYD.md)). 
 The trained model (`model/out/model_q4.bin` + `tokenizer.bin`) ships in the repo, so the LLM
 brain works out of the box.
 
@@ -695,7 +695,7 @@ tools/build_cyd.sh <port> --model
 The movement gestures need an IMU. The CYD has none on the board: a
 QMI8658 or an MPU-6050 breakout on its I2C socket (VCC 3V3, GND, SDA IO16,
 SCL IO15), detected at boot - which chips, and the wiring pin by pin, in
-[docs/CYD.md](docs/CYD.md), *Supported IMUs, and wiring one*. Turning, holding still and handling
+[CYD.md](CYD.md), *Supported IMUs, and wiring one*. Turning, holding still and handling
 are the AMOLED board's too; face down is the CYD's.
 
 | gesture | what the tank does |
@@ -716,13 +716,13 @@ chip awake, and LIGHT, the shipped default, darkens it and light-sleeps.
 The CYD as shipped never deep-sleeps - its case covers BOOT: asleep it is
 dark for as long as it takes, the time lived through at the wake. The
 build's sleep mode is only the row's factory default, and deepsleep, the
-AMOLED's, a build choice with no row: [docs/CYD.md](docs/CYD.md), *Sleep*.
+AMOLED's, a build choice with no row: [CYD.md](CYD.md), *Sleep*.
 
 Back up the factory image before the first flash
 (`esptool.py --chip esp32s3 -p <port> -b 921600 read_flash 0 0x1000000 factory_16MB.bin`)
 and the board goes back to how it arrived with one `write_flash`. In the
 simulator, `make -C sim BOARD_CYD_320X240=1` builds `fishsim-cyd_320x240` at the CYD's 320×240.
-[docs/CYD.md](docs/CYD.md) has the board, the pins and everything the port
+[CYD.md](CYD.md) has the board, the pins and everything the port
 changed.
 
 ## Train your own
@@ -785,7 +785,7 @@ seven-minute prompt check before an overnight run is always worth it.
 - [docs/AUDIO.md](docs/AUDIO.md) — the sound design: the cues, the asset pipeline, the power rules
 - [docs/memory_budget.md](docs/memory_budget.md) — flash, PSRAM, and SRAM plan
 - [docs/bringup.md](docs/bringup.md) — hardware bring-up checklist
-- [docs/CYD.md](docs/CYD.md) — the 2.8" ESP32-S3 CYD: the board, building, what the port changed, the IMU and its gestures
+- [CYD.md](CYD.md) — the 2.8" ESP32-S3 CYD: the board, building, what the port changed, the IMU and its gestures
 
 ## Status
 

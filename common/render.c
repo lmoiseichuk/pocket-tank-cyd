@@ -3748,7 +3748,7 @@ void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, 
     draw_text_8px(&c, SET_LABEL_X + (PAGE_BOWL ? 96 : 0), PAGE_H - 8 - 6, MSP_DIM, ver);
 #endif
     button(&c, SET_CLOSE_X, SET_FOOT_Y, MSP_CLOSE_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "CLOSE", UI_TEXT(2));
-#ifndef CONFIG_POCKET_TANK_BOARD_CYD_320X240 /* (this fork) the CYD has no update channel: no UPDATES (docs/CYD.md) */
+#ifndef CONFIG_POCKET_TANK_BOARD_CYD_320X240 /* (this fork) the CYD has no update channel: no UPDATES (CYD.md) */
     /* UPDATES (2026-09-30, docs/OTA.md): bottom left, the same size as CLOSE */
     button(&c, SET_UPD_X, SET_FOOT_Y, SET_UPD_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "UPDATES", 2);
 #endif

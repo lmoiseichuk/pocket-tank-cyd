@@ -13,7 +13,7 @@ reset the chip before anyone read the log.
    too). It runs `tools/preflight.py` first, which archives `batlog` + `state`
    to `docs/batlog/<date_time>.txt`, and refuses to flash without the archive.
    Commit the archive with the flash. **The 2.8" CYD is the exception:** it is
-   flashed with `tools/build_cyd.sh` (docs/CYD.md). It has no fuel gauge, so
+   flashed with `tools/build_cyd.sh` ([CYD.md](../CYD.md)). It has no fuel gauge, so
    there is no battery log to archive, and this table is about the AMOLED tank.
 2. **Any morning after a night on battery: `tools/preflight.py` first**, before
    the director, before a flash, before anything. Then update the table below.
@@ -58,7 +58,7 @@ reset the chip before anyone read the log.
   the CYD as its fourth board, and the settings page's SLEEP row), app
   only, flashed 2026-10-08 with `tools/build_cyd.sh` over the tank saved
   by v0.3.3. SLEEP is on LIGHT, the build's default - nothing chosen in
-  settings yet - so the CYD goes dark and never deep-sleeps (docs/CYD.md,
+  settings yet - so the CYD goes dark and never deep-sleeps ([CYD.md](../CYD.md),
   *Sleep*). `-O2` throughout, assertions on, log level INFO - what
   upstream ships; no bring-up instrumentation. The model partition is the
   one flashed 2026-09-29 at the full reset. Its saved data before the
@@ -70,7 +70,7 @@ reset the chip before anyone read the log.
   (NEVER would ignore it).
 - **Verified on it, 2026-09-30:** the flip both ways, flat and sideways hold,
   a pick-up reads MOVING, face down sleeps and face up or BOOT wakes in every
-  order (docs/CYD.md, *The IMU*).
+  order ([CYD.md](../CYD.md), *The IMU*).
 - **Verified on it, 2026-10-08:** a clean boot; the director's `deepsleep 15`
   and `deepsleep 8` went dark in lightsleep - awake between looks, a USB
   host being attached - and lit by the timer on the second; the tank's clock

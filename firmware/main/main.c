@@ -547,7 +547,7 @@ static bool dark_light_sleeps(void) {
  * gpio_sleep_sel_dis keeps a pad's awake configuration through light sleep;
  * gpio_sleep_sel_en at the wake hands it back to the isolation. The other
  * pads were isolated in every 1 s slice of the old grace, and the panel, the
- * I2C bus and the IMU answered after it on the bench (docs/CYD.md). */
+ * I2C bus and the IMU answered after it on the bench (CYD.md). */
 static const gpio_num_t DARK_HELD_PINS[] = { PIN_TP_RST, PIN_AMP_EN, PIN_LCD_BL };
 static void dark_hold_pins(bool hold) {
     for (size_t i = 0; i < sizeof DARK_HELD_PINS / sizeof DARK_HELD_PINS[0]; i++) {
@@ -1134,7 +1134,7 @@ static void nvs_start(void) {
 static void request_update(void) {
 #if CONFIG_POCKET_TANK_BOARD_CYD_320X240
     /* the CYD has no update channel (no manifest of its own, one board, flashed
-       by cable: docs/CYD.md): no restart into update mode, which app_main
+       by cable: CYD.md): no restart into update mode, which app_main
        would not enter anyway */
     ESP_LOGW(TAG, "update check: the CYD is updated by cable (tools/build_cyd.sh), not over the air");
     return;

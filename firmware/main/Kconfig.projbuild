@@ -86,7 +86,7 @@ menu "pocket-tank"
         default n
         help
             The CYD has no IMU of its own; an MPU-6050 breakout on its I2C
-            socket stands in (docs/CYD.md). Probed after the QMI8658, so a
+            socket stands in (CYD.md). Probed after the QMI8658, so a
             board carrying both uses the QMI8658.
     config POCKET_TANK_IMU_MPU6050_UP_AXIS
         int "MPU-6050: the axis along the screen's up (0=X 1=Y 2=Z)"

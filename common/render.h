@@ -711,7 +711,7 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
    BRIGHTNESS, VOLUME, the note, LIGHTS OUT, AUTO FEED, then the row chosen at
    run time - SCREEN with no IMU, ROTATION with one (render_settings_set_imu) -
    SLEEP under it on every build but deepsleep (render_settings_set_sleep),
-   and the foot: CLOSE, the version line beside it. No UPDATES: the CYD has no update channel (docs/CYD.md). */
+   and the foot: CLOSE, the version line beside it. No UPDATES: the CYD has no update channel (CYD.md). */
 #undef  SET_TITLE_Y
 #define SET_TITLE_Y   6
 #undef  SET_ROW1_Y
