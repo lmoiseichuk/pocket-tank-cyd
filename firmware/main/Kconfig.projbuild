@@ -66,8 +66,12 @@ menu "pocket-tank"
     config POCKET_TANK_AUDIO_ES8311
         bool "Play the sound bank through the ES8311 codec + NS4150B amp (I2S)"
         default n
+        depends on !POCKET_TANK_WST_320X240
         help
             Enable for the real board (docs/AUDIO.md). Off = stub audio port: cues compile, nothing plays.
+            (this fork, 2026-10-08) Not offered on the Touch-LCD-2, which has
+            no codec: the port would drive the AMOLED's I2S pins there, and
+            its word select, GPIO45, is that board's LCD chip select.
     config POCKET_TANK_IMU_QMI8658
         bool "Look for a QMI8658 IMU (I2C 0x6B / 0x6A)"
         default y
