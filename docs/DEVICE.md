@@ -54,15 +54,18 @@ reset the chip before anyone read the log.
 
 ## The CYD right now (the 2.8" ES3C28P, a separate board)
 
-- **Firmware:** v0.3.3 alpha, build `da87e8cf249c` (upstream's v0.3.3 with
-  the CYD as its fourth board, and the settings page's SLEEP row), app
-  only, flashed 2026-10-08 with `tools/build_cyd.sh` over the tank saved
-  by v0.3.3. SLEEP is on LIGHT, the build's default - nothing chosen in
-  settings yet - so the CYD goes dark and never deep-sleeps ([CYD.md](../CYD.md),
-  *Sleep*). `-O2` throughout, assertions on, log level INFO - what
-  upstream ships; no bring-up instrumentation. The model partition is the
-  one flashed 2026-09-29 at the full reset. Its saved data before the
-  flash: `~/src/dooing/pocket-tank-cyd-backup/nvs_before_sleeprow_20261008_1538.bin`.
+- **Firmware:** v0.3.3 alpha, build `866b7361227d` - main with PR #2 (the
+  Waveshare Touch-LCD-2, CONFIG_POCKET_TANK_WST_320X240) merged in and the
+  dark made every 320x240 board's; the CYD's code is the same machine code
+  as before it, and main's tip (`0a0cc7c`) differs only in
+  tools/build_cyd.sh. App only, flashed 2026-10-08 with `tools/build_cyd.sh`
+  over the tank saved by v0.3.3. SLEEP is on LIGHT, the build's default -
+  nothing chosen in settings yet - so the CYD goes dark and never
+  deep-sleeps ([CYD.md](../CYD.md), *Sleep*). `-O2` throughout, assertions
+  on, log level INFO - what upstream ships; no bring-up instrumentation. The
+  model partition is the one flashed 2026-09-29 at the full reset. Its
+  saved data before each flash is in `~/src/dooing/pocket-tank-cyd-backup/`
+  (`nvs_before_*`).
 - **IMU:** an MPU-6050 (GY-521-style) on the I2C socket, SDA IO16 / SCL IO15,
   0x68, **held flat against the back, pins toward the top edge** - not yet
   soldered. Both `POCKET_TANK_IMU_QMI8658` and `_MPU6050` are on; the
@@ -82,6 +85,11 @@ reset the chip before anyone read the log.
   chosen in settings)`, the tank's save loaded, touch and the MPU-6050 up.
   On the glass (LM, 2026-10-08): "wakeup and sleep works". **Not yet:** a
   dark on the cell, the one place LIGHT really light-sleeps.
+- **The PR #2 build, 2026-10-08:** a clean boot (0 errors, 25 fps), the
+  panel up through the shared SPI port at 40 MHz, the FT6336 and the
+  MPU-6050 up, the tank's save loaded. **Not yet:** LM's look at the glass -
+  the picture, touch at the edges, the flip, face down and a touch waking
+  the dark.
 - **Nothing in flight.** No battery log on this board (no fuel gauge), so no
   preflight; a flash resets nothing that is being measured.
 
