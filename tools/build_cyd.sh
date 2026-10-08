@@ -26,9 +26,12 @@ fi
 # Real errors only (2026-10-08): a bare "error" matched mbedTLS's error.c in
 # every ninja progress line. " error: " is the compiler's and the linker's,
 # and "error: " at the start of a line a tool's own; the other three are
-# ninja's and CMake's.
+# ninja's and CMake's. The display port's own warnings are shown too: the
+# compiler writes the file first, "display_port_spi.c:98:5: warning: ...",
+# so the pattern names the file before the word (the earlier
+# "warning: .*display_port_..." never matched a compiler warning).
 idf.py -B "$BUILD" -D SDKCONFIG="$BUILD/sdkconfig" -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.cyd" build \
-  2>&1 | grep -E "(^| )error: |^FAILED|ninja: build stopped|CMake Error|warning: .*display_port_spi|binary size|build complete|Project build complete"
+  2>&1 | grep -E "(^| )error: |^FAILED|ninja: build stopped|CMake Error|display_port_spi[.]c:[0-9]+:[0-9]+: warning: |binary size|build complete|Project build complete"
 [ "${PIPESTATUS[0]}" -eq 0 ] || { echo "build_cyd: BUILD FAILED - nothing flashed"; exit 1; }
 [ -n "$PORT" ] || exit 0
 case "$PORT" in /dev/serial/by-id/*) ;; *) echo "build_cyd: give the by-id path, not $PORT"; exit 1;; esac
