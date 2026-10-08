@@ -54,9 +54,10 @@ reset the chip before anyone read the log.
 
 ## The CYD right now (the 2.8" ES3C28P, a separate board)
 
-- **Firmware:** v0.2.0 alpha, build `ea323756cfe2` (main after the upstream
-  v0.2.0 merge), app only, flashed 2026-09-30 with `tools/build_cyd.sh`.
-  `-O2` throughout, assertions on, log level INFO - what upstream ships; no
+- **Firmware:** v0.2.0 alpha, build `01eb464ce714` (the sleep modes, in
+  lightsleep: the CYD goes dark and never deep-sleeps - docs/CYD.md,
+  *Sleep*), app only, flashed 2026-10-08 with `tools/build_cyd.sh`. `-O2`
+  throughout, assertions on, log level INFO - what upstream ships; no
   bring-up instrumentation. The model partition is the one flashed
   2026-09-29 at the full reset.
 - **IMU:** an MPU-6050 (GY-521-style) on the I2C socket, SDA IO16 / SCL IO15,
@@ -66,6 +67,12 @@ reset the chip before anyone read the log.
 - **Verified on it, 2026-09-30:** the flip both ways, flat and sideways hold,
   a pick-up reads MOVING, face down sleeps and face up or BOOT wakes in every
   order (docs/CYD.md, *The IMU*).
+- **Verified on it, 2026-10-08:** a clean boot; the director's `deepsleep 15`
+  and `deepsleep 8` went dark in lightsleep - awake between looks, a USB
+  host being attached - and lit by the timer on the second; the tank's clock
+  went from 85 s to 101 s across the 15 s dark, so it counted once. **Not
+  yet:** a touch, a pick-up and face up waking it, the waking tap doing
+  nothing, and a dark on the cell, where it really light-sleeps.
 - **Nothing in flight.** No battery log on this board (no fuel gauge), so no
   preflight; a flash resets nothing that is being measured.
 
