@@ -30,7 +30,13 @@ fi
 # compiler writes the file first, "display_port_spi.c:98:5: warning: ...",
 # so the pattern names the file before the word (the earlier
 # "warning: .*display_port_..." never matched a compiler warning).
-idf.py -B "$BUILD" -D SDKCONFIG="$BUILD/sdkconfig" -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.cyd" build \
+# reconfigure first, every time (2026-10-08): the image's build id is the
+# commit's (firmware/CMakeLists.txt reads `git describe` while CMake
+# configures), and CMake reconfigures by itself only when ../.git/HEAD or
+# ../.git/index changes. In a git worktree .git is a file pointing elsewhere,
+# so neither path exists and the id stayed the previous build's: the CYD
+# reported 7aeb5aa while running 866b736. A reconfigure costs seconds.
+idf.py -B "$BUILD" -D SDKCONFIG="$BUILD/sdkconfig" -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.cyd" reconfigure build \
   2>&1 | grep -E "(^| )error: |^FAILED|ninja: build stopped|CMake Error|display_port_spi[.]c:[0-9]+:[0-9]+: warning: |binary size|build complete|Project build complete"
 [ "${PIPESTATUS[0]}" -eq 0 ] || { echo "build_cyd: BUILD FAILED - nothing flashed"; exit 1; }
 [ -n "$PORT" ] || exit 0
