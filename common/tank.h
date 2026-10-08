@@ -29,8 +29,10 @@
 #define TANK_W 410
 #define TANK_H 502
 #endif
-#ifdef TANK_CYD                 /* the 2.8" CYD (ES3C28P, this fork): 320 x 240 landscape - CONFIG_POCKET_TANK_BOARD_CYD28
-                                 * (tankcore's CMakeLists), or the sim's make CYD=1. A plain rectangle (docs/CYD.md) */
+#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+/* a CYD at 320 x 240 landscape (this fork; the 2.8" ES3C28P is the one built): the
+ * Kconfig board choice, which tankcore's CMakeLists hands to every component, or
+ * the sim's make BOARD_CYD_320X240=1. A plain rectangle (docs/CYD.md) */
 #define TANK_W 320
 #define TANK_H 240
 #endif

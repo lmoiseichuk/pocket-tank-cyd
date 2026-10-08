@@ -17,10 +17,11 @@
  * helpers below (render_text, render_rect, ...) take PAGE coordinates; the
  * tap tests take the frame's, as the touch ports report them. In the
  * rectangle the two are the same thing. */
-#ifdef TANK_CYD                 /* this fork, the CYD's 320 x 240: its pages are the design SCALED (ui.h's UI(), 240 / 368),
-                                   so the page is UI(448) x UI(368), centred - glass x 14..306. The layouts that use the
-                                   whole glass instead (the milestones page, the shop, settings: render.h's TANK_CYD block
-                                   at the end) reach past it on both sides. */
+#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+/* this fork, the CYD's 320 x 240: its pages are the design SCALED (ui.h's UI(), 240 / 368),
+ * so the page is UI(448) x UI(368), centred - glass x 14..306. The layouts that use the
+ * whole glass instead (the milestones page, the shop, settings: the CYD block at the end
+ * of this file) reach past it on both sides. */
 #define PAGE_W 292
 #define PAGE_H 240
 #else
@@ -109,16 +110,17 @@ void render_stats_card(const tank_t *t, int fish_idx, uint16_t *fb, int stride);
 #elif defined(TANK_WATCH)       /* the watch: in from its round corner */
 #define RENDER_CARD_X 36
 #define RENDER_CARD_Y 36
-#elif defined(TANK_CYD)         /* this fork, the CYD's 240 px: the card's pixel-art icons (24 px needs, 16 px trait
-                                   poles) cannot shrink, so it goes to two columns instead of one - the needs down the
-                                   left, the traits and MORE down the right - and the toolbox fits under it (164..234) */
+#elif defined(CONFIG_POCKET_TANK_BOARD_CYD_320X240)
+/* this fork, the CYD's 240 px: the card's pixel-art icons (24 px needs, 16 px trait
+ * poles) cannot shrink, so it goes to two columns instead of one - the needs down the
+ * left, the traits and MORE down the right - and the toolbox fits under it (164..234) */
 #define RENDER_CARD_X 6
 #define RENDER_CARD_Y 6
 #else
 #define RENDER_CARD_X 14
 #define RENDER_CARD_Y 8
 #endif
-#ifdef TANK_CYD
+#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
 #define RENDER_CARD_W 224
 #define RENDER_CARD_H 144
 #else
@@ -336,7 +338,7 @@ enum { SET_TAP_NONE = 0, SET_TAP_CLOSE = 1, SET_TAP_BRIGHT = 2, SET_TAP_VOLUME =
    equal values would compile without a word: the CYD's stay past upstream's */
 _Static_assert(SET_TAP_FLIP > SET_TAP_ROTATE && SET_TAP_FLIP > SET_TAP_SCREEN && SET_TAP_FLIP > SET_TAP_UPDATES && SET_TAP_FACE > SET_TAP_FLIP,
                "the CYD's settings taps must not reuse upstream's numbers");
-/* The CYD's own rows (this fork; TANK_CYD only - no other board draws them).
+/* The CYD's own rows (this fork; the CYD only - no other board draws them).
  * With no IMU to turn the picture, the row where the others have ROTATION is
  * SCREEN, UPRIGHT / FLIPPED: SET_TAP_FLIP carries *value 1 = FLIPPED; the
  * platform turns the display and touch, keeps the choice, and says what it
@@ -551,7 +553,7 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
 #define MSP_HIT_X0    20             /* a row's taps start here: the milestones' portraits and names, the shop's rows */
 #define MSP_TANK_BADGE 4             /* the tank row's badges and page arrow: their top, under MSP_TANK_Y */
 
-/* ---- this fork: the 2.8" CYD (TANK_CYD, 320 x 240). The modals, the
+/* ---- this fork: a CYD at 320 x 240 (CONFIG_POCKET_TANK_BOARD_CYD_320X240). The modals, the
  * notices, the prompts and the setup flow are the design scaled (ui.h), on a
  * 292 x 240 page centred on the glass. These three pages cannot be: seven
  * rows of 32 px badges do not fit 240 px at any pitch, and the shop's and
@@ -560,7 +562,7 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
  * whole of it - no curved bezel to keep clear of - so their columns are glass
  * x, put on the page by CYD_GLASS_X. The upstream names are redefined here
  * rather than branched above, so upstream's own lines stay as written. ---- */
-#ifdef TANK_CYD
+#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
 #define CYD_GLASS_X(x) ((x) - PAGE_X)   /* a column measured on the glass, as a page x */
 /* the milestones page: 24 px badges (the generated copies, tools/gen_icons.py)
    on 28 px rows, the three buttons spread across the whole foot */

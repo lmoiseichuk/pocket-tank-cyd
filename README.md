@@ -504,7 +504,7 @@ cd sim && make && ./fishsim
 
 On macOS the Makefile targets x86_64 by default to match an Intel Homebrew
 SDL2; use `make ARCH=` for a native build.  On Linux it builds for the host.
-`make CYD=1` builds `fishsim-cyd`, the tank at the 2.8" CYD's 320 x 240 ([docs/CYD.md](docs/CYD.md)). 
+`make BOARD_CYD_320X240=1` builds `fishsim-cyd_320x240`, the tank at a CYD's 320 x 240 ([docs/CYD.md](docs/CYD.md)). 
 The trained model (`model/out/model_q4.bin` + `tokenizer.bin`) ships in the repo, so the LLM
 brain works out of the box.
 
@@ -720,7 +720,7 @@ deepsleep, the AMOLED's): [docs/CYD.md](docs/CYD.md), *Sleep*.
 Back up the factory image before the first flash
 (`esptool.py --chip esp32s3 -p <port> -b 921600 read_flash 0 0x1000000 factory_16MB.bin`)
 and the board goes back to how it arrived with one `write_flash`. In the
-simulator, `make -C sim CYD=1` builds `fishsim-cyd` at the CYD's 320×240.
+simulator, `make -C sim BOARD_CYD_320X240=1` builds `fishsim-cyd_320x240` at the CYD's 320×240.
 [docs/CYD.md](docs/CYD.md) has the board, the pins and everything the port
 changed.
 

@@ -28,7 +28,7 @@
 #define BOARD_PINS_H
 #include "sdkconfig.h"
 
-#if CONFIG_POCKET_TANK_BOARD_CYD28
+#if CONFIG_POCKET_TANK_BOARD_CYD_320X240
 /* The 2.8" ESP32-S3 CYD, ES3C28P (lcdwiki.com, ES3C28P_ES2N28P_Specification_V1.0
  * section 4.2). A stock board, no modifications: everything below is as the
  * vendor wires it. The LCD's reset is CHIP_PU - it resets with the chip, so

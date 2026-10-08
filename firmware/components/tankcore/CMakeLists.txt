@@ -22,6 +22,10 @@ endif()
 if(CONFIG_POCKET_TANK_WATCH)   # the watch's 410 x 502 portrait tank
     target_compile_definitions(${COMPONENT_LIB} PUBLIC TANK_WATCH)
 endif()
-if(CONFIG_POCKET_TANK_BOARD_CYD28)   # the 2.8" CYD's 320 x 240 tank
-    target_compile_definitions(${COMPONENT_LIB} PUBLIC TANK_CYD)
+# a CYD at 320 x 240 (this fork). common/ is shared with the simulator and does
+# not include sdkconfig.h, so the Kconfig symbol is handed on under its own
+# name - the sim defines the same one (make BOARD_CYD_320X240=1). The value is
+# sdkconfig.h's own 1: a macro defined twice with the same body is no error.
+if(CONFIG_POCKET_TANK_BOARD_CYD_320X240)
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC CONFIG_POCKET_TANK_BOARD_CYD_320X240=1)
 endif()

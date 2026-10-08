@@ -841,7 +841,7 @@ static void tank_task(void *arg) {
         bool live = imu_port_inverted() != orientation_flipped();   /* the IMU's flip, turned again by the keeper's SCREEN choice */
 #endif
         bool inv = tank_orient(&tank, live);   /* the live flip, or the way up settings' ROTATION locked (0.3.2) */
-#if CONFIG_POCKET_TANK_BOARD_CYD28
+#if CONFIG_POCKET_TANK_BOARD_CYD_320X240
         /* (this fork) the CYD offers ROTATION only with an IMU answering
            (render_settings_set_imu, below); without one its row is SCREEN.
            A lock saved while an IMU answered stays in the save but does not
@@ -936,7 +936,7 @@ static void tank_task(void *arg) {
                 render_milestones(&tank, fb[cur], TANK_W);
                 sel = -1;
             } else if (touch_port_settings()) {  /* settings page: brightness + volume */
-#if CONFIG_POCKET_TANK_BOARD_CYD28
+#if CONFIG_POCKET_TANK_BOARD_CYD_320X240
                 /* the CYD's row is chosen at run time (common/render.h): SCREEN with
                    no IMU, ROTATION and FACE DOWN with one */
                 render_settings_set_flip(orientation_flipped());
@@ -1085,7 +1085,7 @@ static void nvs_start(void) {
  * tank is saved as it is before sleep, then the board restarts into update
  * mode (update_mode.c) - the radio never runs beside the tank */
 static void request_update(void) {
-#if CONFIG_POCKET_TANK_BOARD_CYD28
+#if CONFIG_POCKET_TANK_BOARD_CYD_320X240
     /* the CYD has no update channel (no manifest of its own, one board, flashed
        by cable: docs/CYD.md): no restart into update mode, which app_main
        would not enter anyway */
@@ -1103,7 +1103,7 @@ void device_update_check(void) { request_update(); }
 /* the installer page asked a RUNNING tank for the networks (its Connect to /
  * Change Wi-Fi): saved the same way, then the restart into provisioning mode */
 void device_provision_request(void) {
-#if CONFIG_POCKET_TANK_BOARD_CYD28
+#if CONFIG_POCKET_TANK_BOARD_CYD_320X240
     ESP_LOGW(TAG, "provisioning: the CYD has no update channel, so no Wi-Fi to set up");
     return;
 #endif
@@ -1156,7 +1156,7 @@ void app_main(void) {
     if (board_is_watch()) battery_port_pin_rail("aldo2");   /* the watch's panel power enable is pulled up to ALDO2 */
     battery_port_trim_rails();        /* the schematic's unused outputs off (docs/HANDOFF.md, the battery pass) */
     battery_port_key_init();          /* the PWR key: sleep / power-off IRQs on, the power-on press cleared */
-#if CONFIG_POCKET_TANK_BOARD_CYD28
+#if CONFIG_POCKET_TANK_BOARD_CYD_320X240
     /* the CYD: no update mode and no provisioning wait (it would hold the glass
        dark 8 s after every reset over USB with no network saved). The request
        word is still read, so a stale one is cleared. */

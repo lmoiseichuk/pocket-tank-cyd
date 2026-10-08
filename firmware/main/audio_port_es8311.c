@@ -22,7 +22,7 @@
 
 static const char *TAG = "audio";
 
-#if !CONFIG_POCKET_TANK_BOARD_CYD28   /* the CYD names its own in board_pins.h */
+#if !CONFIG_POCKET_TANK_BOARD_CYD_320X240 /* the CYD names its own in board_pins.h */
 #define PIN_I2S_MCLK  16
 #define PIN_I2S_BCLK  (board_is_watch() ? W_PIN_I2S_BCLK : 9)
 #define PIN_I2S_WS    45

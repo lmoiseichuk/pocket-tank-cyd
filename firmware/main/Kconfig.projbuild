@@ -7,12 +7,12 @@ menu "pocket-tank"
             size (common/tank.h) and which display / touch ports can be used.
         config POCKET_TANK_BOARD_AMOLED18
             bool "Waveshare ESP32-S3-Touch-AMOLED-1.8 (448x368)"
-        config POCKET_TANK_BOARD_CYD28
-            bool "2.8in ESP32-S3 CYD, ES3C28P: ILI9341 + FT6336 (320x240)"
+        config POCKET_TANK_BOARD_CYD_320X240
+            bool "CYD at 320x240: the 2.8in ESP32-S3 ES3C28P, ILI9341 + FT6336"
     endchoice
     config POCKET_TANK_DISPLAY_ILI9341
         bool "Drive the CYD's ILI9341 over SPI, backlight PWM on GPIO45"
-        depends on POCKET_TANK_BOARD_CYD28
+        depends on POCKET_TANK_BOARD_CYD_320X240
         default n
     config POCKET_TANK_DISPLAY_SH8601
         bool "Drive the Waveshare 1.8in AMOLED (SH8601 / CO5300 over QSPI)"
@@ -82,7 +82,7 @@ menu "pocket-tank"
             which does not enable the gesture.
     config POCKET_TANK_IMU_MPU6050
         bool "Look for an MPU-6050 IMU (I2C 0x68 / 0x69)"
-        default y if POCKET_TANK_BOARD_CYD28
+        default y if POCKET_TANK_BOARD_CYD_320X240
         default n
         help
             The CYD has no IMU of its own; an MPU-6050 breakout on its I2C
@@ -118,7 +118,7 @@ menu "pocket-tank"
             other sign.
     config POCKET_TANK_IMU_FACE_DOWN_SLEEP
         bool "Face down sleeps the tank, face up wakes it (a settings toggle)"
-        default y if POCKET_TANK_BOARD_CYD28
+        default y if POCKET_TANK_BOARD_CYD_320X240
         default n
         depends on POCKET_TANK_IMU_QMI8658 || POCKET_TANK_IMU_MPU6050
         help
@@ -147,10 +147,10 @@ menu "pocket-tank"
             bool "none: never goes dark; every way into sleep is ignored, with a log line"
         config POCKET_TANK_SLEEP_SCREEN
             bool "screen: dark, the CPU running"
-            depends on POCKET_TANK_BOARD_CYD28
+            depends on POCKET_TANK_BOARD_CYD_320X240
         config POCKET_TANK_SLEEP_LIGHT
             bool "lightsleep: dark, light-sleeping between looks; never deep sleep"
-            depends on POCKET_TANK_BOARD_CYD28
+            depends on POCKET_TANK_BOARD_CYD_320X240
             help
                 While a USB host is attached the chip stays awake instead,
                 as in screen: light sleep takes the USB port down.

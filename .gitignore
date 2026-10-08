@@ -6,8 +6,8 @@ __pycache__/
 sim/lvgl/
 sim/build/
 sim/fishsim
-sim/build-cyd/
-sim/fishsim-cyd
+sim/build-cyd_320x240/
+sim/fishsim-cyd_320x240
 model/runw
 firmware/ref/
 model/runq4
