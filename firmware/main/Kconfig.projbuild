@@ -118,13 +118,18 @@ menu "pocket-tank"
             up instead, after a face-down sleep), BOOT, the PWR key, or the
             director's timer lights it again where it was. The touch that
             wakes it does nothing in the tank. Made for the CYD, whose case
-            covers BOOT.
+            covers BOOT, and offered only there: the AMOLED's panel sleep
+            holds its touch controller in reset and cuts the panel's rails,
+            so its dark could not wake on a touch, and cycling those rails
+            beside an awake IMU is what railed its X and Z on 2026-08-31.
         config POCKET_TANK_SLEEP_NONE
             bool "none: never goes dark; every way into sleep is ignored, with a log line"
         config POCKET_TANK_SLEEP_SCREEN
             bool "screen: dark, the CPU running"
+            depends on POCKET_TANK_BOARD_CYD28
         config POCKET_TANK_SLEEP_LIGHT
             bool "lightsleep: dark, light-sleeping between looks; never deep sleep"
+            depends on POCKET_TANK_BOARD_CYD28
             help
                 While a USB host is attached the chip stays awake instead,
                 as in screen: light sleep takes the USB port down.

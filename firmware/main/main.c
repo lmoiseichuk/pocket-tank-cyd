@@ -48,6 +48,7 @@
 #include "driver/rtc_io.h"
 #if CONFIG_POCKET_TANK_SLEEP_LIGHT
 #include "driver/usb_serial_jtag.h"         /* usb_serial_jtag_is_connected: the dark stays awake for a USB host */
+#include "board_pins.h"                     /* the outputs the dark holds through light sleep (dark_hold_pins) */
 #endif
 
 /* BOOT (GPIO0, active low, RTC-wake capable): the reset chord (held + a tap
@@ -317,7 +318,8 @@ static void deep_sleep_now(int wake_after_s) {
  *  - in a dark begun face down, neither: lying on its glass, the table could
  *    be the touch, and a knock that read as motion would light it face down
  *    where the gesture, already spent, could not darken it again. Face up
- *    is its wake - turned over or picked up - as it was in the grace.
+ *    is its wake - turned over or picked up - as it was in the grace, but
+ *    on two reads in a row, where the grace took one.
  *  - BOOT, the PMIC's PWR key, or the director's timer (`deepsleep N`).
  * It looks every DARK_SLICE_US. In lightsleep the chip light-sleeps between
  * looks, woken early by BOOT or the touch controller's INT line; in screen -
@@ -328,6 +330,31 @@ static void deep_sleep_now(int wake_after_s) {
  * tank task clamps its next frame's dt, so it is counted once. */
 #define DARK_SLICE_US   100000LL    /* a look at the glass and BOOT: ~0.1 s to wake on a touch held that long */
 #define DARK_SLOW_EVERY 2           /* the IMU and the PWR key every second look: ~5 a second (awake the IMU is read 4) */
+#define DARK_FACE_UP_READS 2        /* a dark begun face down: not face down on this many IMU reads in a row, 0.2 s apart */
+
+#if CONFIG_POCKET_TANK_SLEEP_LIGHT
+/* Light sleep isolates every pad not armed as a wake (ESP-IDF's
+ * ESP_SLEEP_GPIO_RESET_WORKAROUND, on for the S3): input, output and pulls
+ * off, so for each slice an output is left to whatever resistor the board
+ * puts on it. Three outputs the dark relies on must keep their level:
+ *  - the touch controller's reset (GPIO18, driven high): left floating, it
+ *    could reset the FT6336 in every slice, and the read after the slice
+ *    would find no chip - no touch wake, and an I2C error ten times a second;
+ *  - the amplifier's enable (GPIO1, off is high on the CYD);
+ *  - the backlight (GPIO45, LEDC at duty 0: with the clock stopped in light
+ *    sleep the pad holds the low it was putting out).
+ * gpio_sleep_sel_dis keeps a pad's awake configuration through light sleep;
+ * gpio_sleep_sel_en at the wake hands it back to the isolation. The other
+ * pads were isolated in every 1 s slice of the old grace, and the panel, the
+ * I2C bus and the IMU answered after it on the bench (docs/CYD.md). */
+static const gpio_num_t DARK_HELD_PINS[] = { PIN_TP_RST, PIN_AMP_EN, PIN_LCD_BL };
+static void dark_hold_pins(bool hold) {
+    for (size_t i = 0; i < sizeof DARK_HELD_PINS / sizeof DARK_HELD_PINS[0]; i++) {
+        if (hold) gpio_sleep_sel_dis(DARK_HELD_PINS[i]);
+        else gpio_sleep_sel_en(DARK_HELD_PINS[i]);
+    }
+}
+#endif
 
 /* one wait between looks: light sleep (lightsleep, no USB host), or awake */
 static void dark_wait(int64_t us, int touch_int) {
@@ -375,9 +402,13 @@ static void enter_dark(int wake_after_s, bool by_face) {
     ESP_LOGI(TAG, "dark (%s, %s%s): wakes on %s, BOOT%s | battery %d%% %d mV",
              s_sleep_why, SLEEP_MODE_NAME, usb, by_face ? "face up" : "a touch, motion",
              wake_after_s > 0 ? ", the timer" : "", pct0, mv0);
+#if CONFIG_POCKET_TANK_SLEEP_LIGHT
+    dark_hold_pins(true);                       /* touch reset, amp and backlight keep their level in each slice */
+#endif
     int64_t t0 = esp_timer_get_time();
     int64_t until = wake_after_s > 0 ? t0 + (int64_t)wake_after_s * 1000000 : 0;
     bool glass_clear = false;                   /* a finger counts only after the glass was seen without one */
+    int face_up = 0;                            /* IMU reads in a row not face down (a dark begun face down) */
     const char *why = NULL;
     int moved = 0;
     for (int look = 1; ; look++) {
@@ -393,12 +424,22 @@ static void enter_dark(int wake_after_s, bool by_face) {
         if (battery_port_key_poll()) { why = "the PWR key"; break; }
         /* no answer from the IMU keeps it dark: a bus hiccup must not wake it */
         if (by_face) {
-            if (imu_port_face_down_now() == 0) { why = "face up"; break; }
+            /* face up on two reads in a row, 0.2 s apart. One read out of the
+               face-down band is a knock on the table or a cup set down beside
+               it, and a tank lit by that would stay lit lying on its glass:
+               the gesture, already spent, cannot darken it again. A face-down
+               read or no answer starts the count again. */
+            if (imu_port_face_down_now() == 0) face_up++;
+            else face_up = 0;
+            if (face_up >= DARK_FACE_UP_READS) { why = "face up"; break; }
         } else {
             moved = imu_port_rest_moved();
             if (moved) { why = "motion"; break; }
         }
     }
+#if CONFIG_POCKET_TANK_SLEEP_LIGHT
+    dark_hold_pins(false);
+#endif
     while (!gpio_get_level(BTN_SLEEP)) vTaskDelay(pdMS_TO_TICKS(10));   /* a BOOT wake press, still down */
     float dark_s = (esp_timer_get_time() - t0) / 1e6f;
     progression_slept(&tank, dark_s < PROGRESSION_SLEEP_CAP_S ? dark_s : (float)PROGRESSION_SLEEP_CAP_S);

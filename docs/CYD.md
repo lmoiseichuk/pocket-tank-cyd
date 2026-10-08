@@ -149,6 +149,11 @@ short press, the face-down gesture, the director's `deepsleep [N]` and
 | lightsleep | `POCKET_TANK_SLEEP_LIGHT` (the CYD's, `sdkconfig.defaults.cyd`) | the dark, light-sleeping between looks; never deep sleep |
 | deepsleep | `POCKET_TANK_SLEEP_DEEP` (the default, so the AMOLED's) | the grace, then deep sleep or the PMIC power-off, as it always was |
 
+screen and lightsleep are offered on the CYD alone. The AMOLED's panel
+sleep holds its touch controller in reset and cuts the panel's rails, so a
+dark there could not wake on a touch, and cycling those rails beside an
+awake IMU is what railed its X and Z on 2026-08-31.
+
 **The dark** (`enter_dark`, `firmware/main/main.c`): the tank saves, the
 backlight and the sound go off, the tank stops drawing, and ten times a
 second it looks for a wake, for as long as it takes. It lights again where
@@ -160,6 +165,8 @@ it was on:
 - **face up**, and only that, in a dark begun face down: lying on its glass
   the table could be the finger, and a knock read as motion would light it
   face down, where the gesture, already spent, could not darken it again.
+  For the same reason face up counts on two reads in a row, 0.2 s apart:
+  one read out of the face-down band can be a knock.
 - **BOOT**, the PWR key, or the director's timer (`deepsleep N`).
 
 The dark is lived through at the wake as a deep sleep is - growth at a
@@ -293,7 +300,7 @@ g); the README's *Gestures* table is the keeper's version of this.
 | picked up, carried | one poll's summed change over 220 (~0.013 g): `moving`, held 1 s | the codec stays warm | `main.c`, `audio_port_prewarm` |
 | held | `moving` on two polls in a row: `handled` | counts as attention for the light's idle rule (AUTO) | `tank_handled` |
 | screen down, level, still, 2 s (CYD) | out-of-glass axis over 0.5 g toward the table, in-screen axes under 0.35 g, motion under 1000, 8 polls; once per lie-down | sleeps as a BOOT press | `imu_port_take_face_down`, `main.c` |
-| screen up / picked up, asleep (CYD) | one read every 0.2 s of the dark (each 1 s of the deepsleep mode's grace): no longer face down | wakes in place - after a sleep that began face down | `imu_port_face_down_now`, `enter_dark` |
+| screen up / picked up, asleep (CYD) | no longer face down on two reads in a row, 0.2 s apart (one read, each 1 s of the deepsleep mode's grace) | wakes in place - after a sleep that began face down | `imu_port_face_down_now`, `enter_dark` |
 | picked up or tilted, dark (CYD) | still for ~1 s sets the rest pose; then off it by 2500 (~0.15 g) on two reads in a row, 0.2 s apart; not in a dark begun face down | wakes in place | `imu_port_rest_moved`, `enter_dark` |
 | a touch, dark (CYD) | a finger on the glass, after the glass was seen clear; not in a dark begun face down | wakes in place; that touch does nothing in the tank | `touch_port_finger_now`, `touch_port_swallow` |
 | BOOT, short press | the button (GPIO0), at release | sleep - on the CYD the dark, which a press ends; in the deepsleep mode a press within the 20-minute grace wakes in place, and after it BOOT boots | `sleep_button_poll`, `enter_sleep_for` |
@@ -327,12 +334,14 @@ line wired (below).
   finger (without it a tap shorter than the 0.1 s between looks can be
   missed - a held one cannot); and nobody has measured what the dark draws.
   Where it could be cut: the panel is in DISPOFF, not SLPIN (120 ms more to
-  wake); the MPU-6050 is awake (~0.5 mA) where its cycle mode would do; the
-  touch controller is read ten times a second, which may keep it out of its
-  own monitor mode; and in light sleep ESP-IDF isolates every pin not armed
-  as a wake (`ESP_SLEEP_GPIO_RESET_WORKAROUND`), so the amplifier's enable
-  (GPIO1, on when low) and the backlight (GPIO45) are left to the board's
-  own resistors.
+  wake); the MPU-6050 is awake (~0.5 mA) where its cycle mode would do; and
+  the touch controller is read ten times a second, which may keep it out of
+  its own monitor mode. In light sleep ESP-IDF isolates every pin not armed
+  as a wake (`ESP_SLEEP_GPIO_RESET_WORKAROUND`); the dark keeps three
+  outputs driven through it (`dark_hold_pins`) - the touch controller's
+  reset (GPIO18, which floating could reset the FT6336 in every slice), the
+  amplifier's enable (GPIO1, off when high) and the backlight (GPIO45) - and
+  leaves the rest isolated, as every 1 s slice of the old grace did.
 - **Nothing takes the tank back into the dark.** There is no idle timeout:
   a wake that nobody meant - a bump that read as a pick-up - leaves it lit
   until it is laid face down. If that happens in the case, a timeout back
