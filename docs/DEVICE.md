@@ -80,7 +80,8 @@ reset the chip before anyone read the log.
 - **The SLEEP-row build, 2026-10-08:** a clean boot (0 errors, 23-25 fps),
   the boot line `sleep mode: lightsleep (the build's default, nothing
   chosen in settings)`, the tank's save loaded, touch and the MPU-6050 up.
-  **Not yet:** the row tapped on the glass, and each choice slept in.
+  On the glass (LM, 2026-10-08): "wakeup and sleep works". **Not yet:** a
+  dark on the cell, the one place LIGHT really light-sleeps.
 - **Nothing in flight.** No battery log on this board (no fuel gauge), so no
   preflight; a flash resets nothing that is being measured.
 
