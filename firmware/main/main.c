@@ -841,6 +841,18 @@ static void tank_task(void *arg) {
         bool live = imu_port_inverted() != orientation_flipped();   /* the IMU's flip, turned again by the keeper's SCREEN choice */
 #endif
         bool inv = tank_orient(&tank, live);   /* the live flip, or the way up settings' ROTATION locked (0.3.2) */
+#if CONFIG_POCKET_TANK_BOARD_CYD28
+        /* (this fork) the CYD offers ROTATION only with an IMU answering
+           (render_settings_set_imu, below); without one its row is SCREEN.
+           A lock saved while an IMU answered stays in the save but does not
+           hold the picture then: SCREEN could not turn it, and no row could
+           unlock it. */
+        bool rotation_row = false;
+#if CONFIG_POCKET_TANK_IMU_FACE_DOWN_SLEEP
+        rotation_row = s_imu;
+#endif
+        if (!rotation_row) inv = live;
+#endif
 #ifdef TANK_WATCH
         inv = tank_screen_turned(&tank);  /* worn on a wrist the live flip never runs (the arm swings through every angle):
                                              the way up is the keeper's setting, or what AUTO learned from the taps (tank.h) */
