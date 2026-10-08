@@ -54,16 +54,20 @@ reset the chip before anyone read the log.
 
 ## The CYD right now (the 2.8" ES3C28P, a separate board)
 
-- **Firmware:** v0.2.0 alpha, build `01eb464ce714` (the sleep modes, in
-  lightsleep: the CYD goes dark and never deep-sleeps - docs/CYD.md,
-  *Sleep*), app only, flashed 2026-10-08 with `tools/build_cyd.sh`. `-O2`
-  throughout, assertions on, log level INFO - what upstream ships; no
-  bring-up instrumentation. The model partition is the one flashed
-  2026-09-29 at the full reset.
+- **Firmware:** v0.3.3 alpha, build `da87e8cf249c` (upstream's v0.3.3 with
+  the CYD as its fourth board, and the settings page's SLEEP row), app
+  only, flashed 2026-10-08 with `tools/build_cyd.sh` over the tank saved
+  by v0.3.3. SLEEP is on LIGHT, the build's default - nothing chosen in
+  settings yet - so the CYD goes dark and never deep-sleeps (docs/CYD.md,
+  *Sleep*). `-O2` throughout, assertions on, log level INFO - what
+  upstream ships; no bring-up instrumentation. The model partition is the
+  one flashed 2026-09-29 at the full reset. Its saved data before the
+  flash: `~/src/dooing/pocket-tank-cyd-backup/nvs_before_sleeprow_20261008_1538.bin`.
 - **IMU:** an MPU-6050 (GY-521-style) on the I2C socket, SDA IO16 / SCL IO15,
   0x68, **held flat against the back, pins toward the top edge** - not yet
   soldered. Both `POCKET_TANK_IMU_QMI8658` and `_MPU6050` are on; the
-  QMI8658C is on order. Face-down sleep is on, FACE DOWN = SLEEP.
+  QMI8658C is on order. Face down sleeps the tank, as the SLEEP row allows
+  (NEVER would ignore it).
 - **Verified on it, 2026-09-30:** the flip both ways, flat and sideways hold,
   a pick-up reads MOVING, face down sleeps and face up or BOOT wakes in every
   order (docs/CYD.md, *The IMU*).
@@ -73,6 +77,10 @@ reset the chip before anyone read the log.
   went from 85 s to 101 s across the 15 s dark, so it counted once. **Not
   yet:** a touch, a pick-up and face up waking it, the waking tap doing
   nothing, and a dark on the cell, where it really light-sleeps.
+- **The SLEEP-row build, 2026-10-08:** a clean boot (0 errors, 23-25 fps),
+  the boot line `sleep mode: lightsleep (the build's default, nothing
+  chosen in settings)`, the tank's save loaded, touch and the MPU-6050 up.
+  **Not yet:** the row tapped on the glass, and each choice slept in.
 - **Nothing in flight.** No battery log on this board (no fuel gauge), so no
   preflight; a flash resets nothing that is being measured.
 
