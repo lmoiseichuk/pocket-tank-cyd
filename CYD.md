@@ -47,6 +47,11 @@ Against upstream's main (`git log upstream/main..main`):
 - **The simulator's fourth world.** `make -C sim 320X240=1` builds
   `fishsim-320x240`, and `make -C sim check-all` runs the selftests in
   all four worlds.
+- **A second 320 x 240 board.** `CONFIG_POCKET_TANK_WST_320X240` builds the
+  same tank for the Waveshare ESP32-S3-Touch-LCD-2, contributed by adampog
+  (*The Waveshare ESP32-S3-Touch-LCD-2*). Both boards select
+  `CONFIG_POCKET_TANK_320X240`, the part every 320 x 240 board shares; each
+  keeps its own pins and chips under its own name.
 
 What reaches upstream's boards: the IMU code split into one driver per chip
 (`imu_port.c`, `imu_qmi8658.c`, `imu_mpu6050.c`), the sleep-mode choice in
@@ -750,6 +755,54 @@ there needs the IMU's INT line wired (below).
   40 MHz to about 33 fps.
 - **The decorations** keep their pixel sizes: the castle is 146 px tall in a
   240 px tank. Worth a look on the glass.
+
+## The Waveshare ESP32-S3-Touch-LCD-2
+
+A second 320 x 240 board, the
+[ESP32-S3-Touch-LCD-2](https://www.waveshare.com/wiki/ESP32-S3-Touch-LCD-2):
+an ESP32-S3R8 (16 MB flash, 8 MB octal PSRAM, as the AMOLED board) behind a
+2-inch ST7789T3 IPS panel, scanned landscape, with a CST816D touch panel and
+a QMI8658 IMU on one I2C bus. It came to the fork as pull request #2 from
+adampog, who ran it on the bench on the fork as it was before upstream's
+v0.3.3 - 30-34 fps, a 16 ms flush at 80 MHz, a decision every ~3.5 s, the
+touch and the colours right - and merged here onto today's main
+(2026-10-08). It is built here, every image, but not run: nobody here has
+one.
+
+It shares everything in `CONFIG_POCKET_TANK_320X240` with the CYD - the
+tank, the pages, the settings rows, no updates over Wi-Fi - and its own
+`CONFIG_POCKET_TANK_WST_320X240` carries the rest: its pins
+(`firmware/main/board_pins.h`), the ST7789 through the shared SPI display
+port (`display_port_spi.c`, the TF card's select held high off the panel's
+bus) and the CST816D (`touch_port_ft3168.c`, landscape from the driver with
+no 180-degree turn). No codec, so no sound; no PMIC, so no battery pill and
+no PWR key; no clock chip.
+
+**Settings.** Its IMU senses handling - the light's idle rule - but does not
+turn the picture (`CONFIG_POCKET_TANK_IMU_AUTO_FLIP=n`: with the AMOLED's
+axes it flipped back and forth in the hand), so its settings page has the
+SCREEN row (UPRIGHT / FLIPPED) where the CYD with an IMU has ROTATION. It
+has no SLEEP row: it sleeps as upstream's boards do (deepsleep, the
+default), BOOT its sleep key - a press within the 20-minute grace wakes it
+in place, and after it BOOT boots.
+
+**Building and flashing.** Its defaults are `firmware/sdkconfig.defaults.wst`,
+on top of `sdkconfig.defaults` as the CYD's are, into its own build
+directory. There is no script; from `firmware/`, with `<port>` its by-id
+path (*Building and flashing*) and its factory image backed up the same
+way:
+
+```sh
+. "${IDF_PATH:-$HOME/.espressif/esp-idf/v5.5}/export.sh"
+idf.py -B build_wst -D SDKCONFIG=build_wst/sdkconfig \
+       -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.wst" build
+esptool.py --chip esp32s3 -p <port> -b 921600 write_flash 0x290000 ../model/out/model_q4.bin   # the first time: the model
+idf.py -B build_wst -D SDKCONFIG=build_wst/sdkconfig -p <port> -b 921600 flash
+```
+
+The defaults only fill in what an sdkconfig lacks: after a defaults file
+changes, delete `build_wst/sdkconfig` before building. `PT_BOARD` names the
+image `wst_320x240`.
 
 ## Syncing with upstream
 

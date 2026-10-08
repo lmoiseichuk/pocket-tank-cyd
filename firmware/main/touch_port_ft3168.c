@@ -16,7 +16,10 @@
  * directly over I2C; its panel px go through the display port's view
  * (display_port_panel_to_tank) and everything after that is the same.
  * The WATCH (2.06, 2026-10-02) has the FT3168 of the 1.8's V1 board, its
- * reset on a GPIO. Its own build is a portrait tank: panel px = tank px. */
+ * reset on a GPIO. Its own build is a portrait tank: panel px = tank px.
+ * (this fork) The 320x240 boards: the CYD's FT6336 and the Touch-LCD-2's
+ * CST816D (adampog, 2026-10-08) through esp_lcd_touch like the 1.8's, each
+ * already landscape from the driver; map_touch turns the CYD's 180 degrees. */
 #include "touch_port.h"
 #include "display_port.h"
 #include "update.h"
@@ -777,5 +780,6 @@ int touch_port_wake_gpio(void) {
     return PIN_TP_INT;
 }
 #else
-int touch_port_wake_gpio(void) { return -1; }    /* the AMOLED's INT is not in use, and display_port_sleep holds its touch in reset */
+int touch_port_wake_gpio(void) { return -1; }    /* the AMOLED's INT is not in use, and display_port_sleep holds its touch in reset;
+                                                    the Touch-LCD-2 sleeps deep, so it has no dark to wake from */
 #endif

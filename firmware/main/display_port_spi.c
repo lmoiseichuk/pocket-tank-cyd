@@ -180,9 +180,10 @@ void display_port_flush(const uint16_t *fb) {
 }
 
 /* ---- the board questions upstream's ports ask (display_port.h, v0.3.0) ----
- * The CYD is none of the Waveshare boards: no round glass, no watch, no IO
- * expander, no PWR key sense line, no panel deep standby or QSPI bus to hold,
- * and the frame IS the panel - so each answer is the plain one. */
+ * Neither SPI board is one of upstream's AMOLED boards: no round glass, no
+ * watch, no IO expander, no PWR key sense line, no panel deep standby or
+ * QSPI bus to hold, and the frame IS the panel - so each answer is the plain
+ * one, on the CYD and the Touch-LCD-2 alike. */
 bool board_is_round(void) { return false; }
 bool board_is_watch(void) { return false; }
 bool board_has_expander(void) { return false; }

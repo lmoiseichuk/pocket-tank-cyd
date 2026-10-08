@@ -72,7 +72,8 @@ menu "pocket-tank"
         bool "Look for a QMI8658 IMU (I2C 0x6B / 0x6A)"
         default y
         help
-            The AMOLED board's IMU, and the part the CYD is waiting for.
+            The AMOLED board's IMU, the Touch-LCD-2's, and the part the CYD
+            is waiting for.
             Probed first at boot; the screen's 180-degree flip and the
             handling detector run on whichever enabled IMU answers.
     config POCKET_TANK_IMU_QMI8658_UP_AXIS

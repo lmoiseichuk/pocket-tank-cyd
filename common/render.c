@@ -3607,8 +3607,9 @@ static const char *const SET_FEED[2]   = { "ON", "OFF" };          /* the defaul
 #if TANK_WORN
 static const char *const SET_SCREEN[2] = { "NORMAL", "TURNED" };   /* the default first */
 #endif
-/* this fork, the CYD: the row where the others have ROTATION is chosen at
-   run time (render.h, SET_TAP_FLIP), and the SLEEP row under it (SET_TAP_SLEEP) */
+/* this fork, the 320x240 boards: the row where the others have ROTATION is
+   chosen at run time (render.h, SET_TAP_FLIP), and on the CYD the SLEEP row
+   under it (SET_TAP_SLEEP) */
 #ifdef CONFIG_POCKET_TANK_320X240
 static const char *const SET_FLIP[2] = { "UPRIGHT", "FLIPPED" };
 static const char *const SET_SLEEP[3] = { "NEVER", "SCREEN", "LIGHT" };   /* SET_SLEEP_*'s order */
@@ -3706,7 +3707,9 @@ void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, 
     draw_text(&c, SET_LABEL_X, SET_NOTE5_Y, 2, MSP_DIM, "WORN THE OTHER WAY AROUND?");
 #else
 #ifdef CONFIG_POCKET_TANK_320X240
-    /* (this fork) the CYD with no IMU to turn the picture: the keeper's SCREEN */
+    /* (this fork) a 320x240 board with no IMU to turn the picture - the CYD
+       without its breakout, the Touch-LCD-2, whose IMU does not turn it
+       (2026-10-08, adampog): the keeper's SCREEN */
     if (!g_set_imu) set_row(&c, SET_ROW5_Y, "SCREEN", SET_FLIP, 2, g_set_flipped ? 1 : 0);
     else
 #endif

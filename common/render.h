@@ -332,14 +332,15 @@ enum { SET_TAP_NONE = 0, SET_TAP_CLOSE = 1, SET_TAP_BRIGHT = 2, SET_TAP_VOLUME =
                                    for the save - the platform only logs it (the picture turns on the next frame) */
        SET_TAP_FEED = 8,        /* AUTO FEED (0.3.2): *value 1 = ON; applied and marked for the save */
        SET_TAP_ROTATE = 9,      /* ROTATION (0.3.2): *value 1 = locked; applied and marked for the save */
-       SET_TAP_FLIP = 10,       /* this fork, the CYD with no IMU: SCREEN UPRIGHT / FLIPPED (below) */
+       SET_TAP_FLIP = 10,       /* this fork, a 320x240 board with no IMU turning the picture: SCREEN UPRIGHT / FLIPPED (below) */
        SET_TAP_SLEEP = 11 };    /* this fork, the CYD not built for deepsleep: SLEEP NEVER / SCREEN / LIGHT (below) */
 /* (this fork) the platforms test these in if-chains, not a switch, so two
    equal values would compile without a word: the CYD's stay past upstream's */
 _Static_assert(SET_TAP_FLIP > SET_TAP_ROTATE && SET_TAP_FLIP > SET_TAP_SCREEN && SET_TAP_FLIP > SET_TAP_UPDATES && SET_TAP_SLEEP > SET_TAP_FLIP,
                "the CYD's settings taps must not reuse upstream's numbers");
-/* The CYD's own rows (this fork; the CYD only - no other board draws them).
- * With no IMU to turn the picture, the row where the others have ROTATION is
+/* The 320x240 boards' own rows (this fork; no other board draws them). With
+ * no IMU to turn the picture - the CYD without its breakout, the Touch-LCD-2,
+ * whose IMU senses handling only - the row where the others have ROTATION is
  * SCREEN, UPRIGHT / FLIPPED: SET_TAP_FLIP carries *value 1 = FLIPPED; the
  * platform turns the display and touch, keeps the choice, and says what it
  * is here so the row shows it. */
@@ -348,7 +349,7 @@ void render_settings_set_flip(bool flipped);
  * ROTATION. The platform says whether an IMU answered. The choice is made at
  * run time, where upstream picks SCREEN or ROTATION by the board (TANK_WORN). */
 void render_settings_set_imu(bool imu);
-/* Under it, IMU or not, the SLEEP row (2026-10-08): what every way into sleep
+/* Under it on the CYD, IMU or not, the SLEEP row (2026-10-08): what every way into sleep
  * does - BOOT's short press, the face-down gesture, the PWR key, the
  * director's sleeps. NEVER ignores them all, SCREEN goes dark with the chip
  * awake, LIGHT goes dark and light-sleeps between its looks at the glass.

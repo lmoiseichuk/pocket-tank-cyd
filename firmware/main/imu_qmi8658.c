@@ -1,6 +1,8 @@
 /* imu_qmi8658.c — a QMI8658 6-axis IMU (I2C 0x6B, alt 0x6A) as imu_port's
  * accelerometer (see imu_chip.h): accel only at +-2 g and 31.25 Hz, gyro off.
- * The AMOLED board's own IMU, and the part the CYD is waiting for. */
+ * The AMOLED board's own IMU, the Touch-LCD-2's (where it senses handling but
+ * does not turn the picture: sdkconfig.defaults.wst), and the part the CYD is
+ * waiting for. */
 #include "sdkconfig.h"
 #include "imu_chip.h"
 #include "display_port.h"      /* board_is_round, board_is_watch */

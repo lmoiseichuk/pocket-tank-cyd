@@ -11,6 +11,7 @@
 > - an MPU-6050 beside the QMI8658, probed at boot; on the CYD an IMU breakout on its I2C socket, and face down sleeps the tank
 > - on the CYD, no updates over Wi-Fi, no battery page, no PWR key and no clock chip
 > - the simulator's fourth world, `make -C sim 320X240=1`, and `make -C sim check-all` across all four
+> - a second 320 x 240 board, `CONFIG_POCKET_TANK_WST_320X240`: the Waveshare ESP32-S3-Touch-LCD-2 (adampog's), sharing `CONFIG_POCKET_TANK_320X240` with the CYD
 >
 > Using it, building and flashing it, and syncing the fork with upstream:
 > **[CYD.md](CYD.md)**.
