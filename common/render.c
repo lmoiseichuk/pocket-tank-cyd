@@ -3608,8 +3608,8 @@ static const char *const SET_FEED[2]   = { "ON", "OFF" };          /* the defaul
 static const char *const SET_SCREEN[2] = { "NORMAL", "TURNED" };   /* the default first */
 #endif
 /* this fork, the 320x240 boards: the row where the others have ROTATION is
-   chosen at run time (render.h, SET_TAP_FLIP), and on the CYD the SLEEP row
-   under it (SET_TAP_SLEEP) */
+   chosen at run time (render.h, SET_TAP_FLIP), and the SLEEP row under it
+   (SET_TAP_SLEEP) */
 #ifdef CONFIG_POCKET_TANK_320X240
 static const char *const SET_FLIP[2] = { "UPRIGHT", "FLIPPED" };
 static const char *const SET_SLEEP[3] = { "NEVER", "SCREEN", "LIGHT" };   /* SET_SLEEP_*'s order */
@@ -3780,7 +3780,7 @@ int render_settings_tap(float x, float y, int *value) {
     if (y >= SET_SEG_Y(SET_ROW3_Y) - UI(12) && y < SET_SEG_Y(SET_ROW4_Y) - UI(12)) { if (seg < 0) return SET_TAP_NONE; *value = 0; return x < SET_SPAN_MID ? SET_HIT_LIGHT_PREV : SET_HIT_LIGHT_NEXT; }
     if (y >= SET_SEG_Y(SET_ROW4_Y) - UI(12) && y < SET_SEG_Y(SET_ROW5_Y) - UI(12)) { if (two < 0) return SET_TAP_NONE; *value = two == 0; return SET_TAP_FEED; }
 #ifdef CONFIG_POCKET_TANK_320X240
-    /* (this fork) a 320x240 board: SCREEN (no IMU) or ROTATION, then SLEEP (the CYD not built for deepsleep) */
+    /* (this fork) a 320x240 board: SCREEN (no IMU) or ROTATION, then SLEEP (not on a deepsleep build) */
     if (y >= SET_SEG_Y(SET_ROW5_Y) - UI(12) && y < SET_SEG_Y(SET_ROW6_Y) - UI(12)) {
         if (two < 0) return SET_TAP_NONE;
         if (!g_set_imu) { *value = two == 1; return SET_TAP_FLIP; }
@@ -3829,7 +3829,7 @@ int render_settings_touch(tank_t *t, float x, float y, bool down, int *value) {
                 if ((v != 0) != t->screen_turned) { tank_screen_set(t, v != 0); progression_settings_changed(); }
                 r = SET_TAP_SCREEN; *value = v;
             } else if (h == SET_TAP_CLOSE || h == SET_TAP_BRIGHT || h == SET_TAP_VOLUME || h == SET_TAP_UPDATES
-                       || h == SET_TAP_FLIP || h == SET_TAP_SLEEP) { r = h; *value = v; }   /* FLIP, SLEEP: the CYD's, the platform's to apply */
+                       || h == SET_TAP_FLIP || h == SET_TAP_SLEEP) { r = h; *value = v; }   /* FLIP, SLEEP: the 320x240 boards', the platform's to apply */
         }
     }
     s_down = down;

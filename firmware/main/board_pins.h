@@ -65,6 +65,17 @@
 #define PIN_I2S_DOUT      8        /* ESP -> codec DSDIN; GPIO6 is the microphone's way back, unused */
 #define PIN_AMP_EN        1
 #define AMP_EN_ON         0        /* the spec: "low level enable" */
+/* (this fork; moved here from main.c on 2026-10-08, when the dark became
+ * every 320x240 board's) The outputs the dark holds through light sleep
+ * (main.c's dark_hold_pins): light sleep isolates every other pad, leaving
+ * it to whatever resistor the board puts on it.
+ *  - the touch controller's reset (GPIO18, driven high): left floating, it
+ *    could reset the FT6336 in every slice, and the read after the slice
+ *    would find no chip - no touch wake, and an I2C error ten times a second;
+ *  - the amplifier's enable (GPIO1, off is high);
+ *  - the backlight (GPIO45, LEDC at duty 0: with the clock stopped in light
+ *    sleep the pad holds the low it was putting out). */
+#define BOARD_DARK_HELD_PINS PIN_TP_RST, PIN_AMP_EN, PIN_LCD_BL
 #elif CONFIG_POCKET_TANK_WST_320X240
 /* The Waveshare ESP32-S3-Touch-LCD-2 (waveshare.com/wiki/ESP32-S3-Touch-LCD-2:
  * the ESP-IDF demos' main.c, the Arduino factory app, and the schematic's
@@ -97,6 +108,18 @@
 #define PIN_BAT_ADC       5        /* ADC1_CH4: VBAT through 200K / 100K, so x3 */
 #define PANEL_W           240      /* native portrait; the panel scans landscape (MADCTL) */
 #define PANEL_H           320
+/* (this fork, 2026-10-08) The outputs the dark holds through light sleep
+ * (main.c's dark_hold_pins), as the CYD's list above; a pin the board does
+ * not have is not listed.
+ *  - the backlight (GPIO1, LEDC at duty 0): it drives an NPN's base, and an
+ *    isolated, floating base could light the glass a little in the dark;
+ *  - the TF card's select (GPIO41, held high by display_port_spi.c): the
+ *    card stays off the shared SPI lines, slept or not.
+ * The LCD's and the touch panel's reset is one net with its own pull-up and
+ * no GPIO (above), so it keeps its level in light sleep with nothing held:
+ * the CST816D is not reset by a slice, as a floating FT6336 reset could be
+ * on the CYD. No amplifier: there is no codec. */
+#define BOARD_DARK_HELD_PINS PIN_LCD_BL, PIN_SD_CS
 #else
 #define PIN_LCD_CS        12
 #define PIN_LCD_PCLK      11

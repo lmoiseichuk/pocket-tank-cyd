@@ -49,7 +49,7 @@ void sleep_setting_set(int choice) {
     else ESP_LOGI(TAG, "LIGHT: a sleep goes dark, light-sleeping between looks (awake while a USB host is attached)");
 }
 #else
-/* no row (an AMOLED board, the Touch-LCD-2, or a CYD built for deepsleep): the build decides */
+/* no row (an AMOLED board, or a 320x240 board built for deepsleep): the build decides */
 void sleep_setting_init(void) { }
 void sleep_setting_save(void) { }
 int sleep_setting(void) { return -1; }

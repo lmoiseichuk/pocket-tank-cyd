@@ -28,12 +28,13 @@ Against upstream's main (`git log upstream/main..main`):
   page the build draws; the stats card goes to two columns, the milestones page
   takes 24 px badges, and the shop and settings span the whole glass
   (*What the port changes*).
-- **Two settings rows of the CYD's own.** SCREEN turns the picture on a
-  board with no IMU and becomes ROTATION when one answers; SLEEP (NEVER /
-  SCREEN / LIGHT) chooses what every way into sleep does (*Settings*).
+- **Two settings rows of the 320 x 240 boards' own.** SCREEN turns the
+  picture on a board with no IMU and becomes ROTATION when one answers;
+  SLEEP (NEVER / SCREEN / LIGHT) chooses what every way into sleep does
+  (*Settings*).
 - **A sleep that never deep-sleeps.** Two sleep modes upstream does not
   have, screen and lightsleep, darken the tank and wake it on a touch, a
-  pick-up or BOOT; the CYD ships on lightsleep (*Sleep*).
+  pick-up or BOOT; both 320 x 240 boards ship on lightsleep (*Sleep*).
 - **A second IMU.** An MPU-6050 beside the QMI8658, each a Kconfig line,
   probed at boot. The CYD has neither on the board: a breakout goes on its
   I2C socket, and laying the board face down then sleeps the tank
@@ -156,7 +157,7 @@ taps: the first shows the refund and OK?, the second sells.
 | AUTO FEED | ON / OFF | ON: the tank feeds a fish that is really hungry. OFF: only you feed; a fish left starving in a lit tank slowly loses trust |
 | SCREEN | UPRIGHT / FLIPPED | with no IMU answering: turns the picture and the touch 180 degrees, kept in NVS |
 | ROTATION | one padlock button, with LOCKED or UNLOCKED beside it | in SCREEN's place once an IMU answers. Tap the padlock to lock the picture the way up it is now; tap it again to let it follow the board turned over |
-| SLEEP | NEVER / SCREEN / LIGHT | what every way into sleep does: NEVER ignores it, SCREEN darkens the glass with the chip awake, LIGHT darkens it and light-sleeps. LIGHT is the factory default; a choice is kept in NVS and applies from the next sleep (*Sleeping and waking*) |
+| SLEEP | NEVER / SCREEN / LIGHT | what every way into sleep does, on every 320 x 240 board: NEVER ignores it, SCREEN darkens the glass with the chip awake, LIGHT darkens it and light-sleeps. LIGHT is the factory default; a choice is kept in NVS and applies from the next sleep (*Sleeping and waking*) |
 
 At the foot: the release and the build id, small and dim ("V0.3.3 ALPHA
 BUILD ...", cut short of CLOSE), and CLOSE. There is no UPDATES button.
@@ -513,33 +514,38 @@ finger-landing correction made every miss land above its button, so it is
 
 ## Sleep
 
-**The CYD as shipped never deep-sleeps** (2026-10-08). In its case BOOT cannot be
-reached, and deep sleep hears nothing else, so after the 20-minute grace
-the tank stayed dark for good. What sleep does is the sleep mode, and every
+**The 320 x 240 boards as shipped never deep-sleep** (2026-10-08). The dark
+was made for the CYD: in its case BOOT cannot be reached, and deep sleep
+hears nothing else, so after the 20-minute grace the tank stayed dark for
+good. Since the same day it is every 320 x 240 board's, part of
+`POCKET_TANK_320X240` - the Touch-LCD-2's too, which until then slept as
+upstream's boards do, BOOT its only way back (*The Waveshare
+ESP32-S3-Touch-LCD-2*). What sleep does is the sleep mode, and every
 way into sleep goes through it: BOOT's short press, the face-down gesture,
 the director's `deepsleep [N]` and `poweroff`, and the PWR key on a board
 with a PMIC.
 
-On the CYD the mode is the keeper's: the settings page's **SLEEP** row
-(NEVER / SCREEN / LIGHT, 2026-10-08) changes it at run time, kept in NVS as
-`tank/sleep` and re-saved after a tank reset if the keeper chose one (the
+On a 320 x 240 board the mode is the keeper's: the settings page's
+**SLEEP** row (NEVER / SCREEN / LIGHT, 2026-10-08) changes it at run time,
+kept in NVS as `tank/sleep` and re-saved after a tank reset if the keeper chose one (the
 build's default is never written). The Kconfig choice,
 `POCKET_TANK_SLEEP_MODE`, is only the factory default - what the tank does
 until a segment is tapped; the boot log says which of the two it is.
-deepsleep is a build choice only: a CYD built for it has no SLEEP row and
-sleeps as deepsleep always has, the face-down gesture included.
+deepsleep is a build choice only: a 320 x 240 board built for it has no
+SLEEP row and sleeps as deepsleep always has, the face-down gesture
+included.
 
-| mode | Kconfig (on the CYD, the row's factory default) | SLEEP row | sleep is |
+| mode | Kconfig (on a 320 x 240 board, the row's factory default) | SLEEP row | sleep is |
 |---|---|---|---|
 | none | `POCKET_TANK_SLEEP_NONE` | NEVER | nothing: one log line says what asked and that it was ignored |
 | screen | `POCKET_TANK_SLEEP_SCREEN` | SCREEN | the dark, with the CPU running |
-| lightsleep | `POCKET_TANK_SLEEP_LIGHT` (the CYD's, `sdkconfig.defaults.cyd`) | LIGHT | the dark, light-sleeping between looks; never deep sleep |
+| lightsleep | `POCKET_TANK_SLEEP_LIGHT` (the CYD's and the Touch-LCD-2's, `sdkconfig.defaults.cyd` and `.wst`) | LIGHT | the dark, light-sleeping between looks; never deep sleep |
 | deepsleep | `POCKET_TANK_SLEEP_DEEP` (the default, so the AMOLED's) | no row | the grace, then deep sleep or the PMIC power-off, as it always was |
 
-screen and lightsleep are offered on the CYD alone. The AMOLED's panel
-sleep holds its touch controller in reset and cuts the panel's rails, so a
-dark there could not wake on a touch, and cycling those rails beside an
-awake IMU is what railed its X and Z on 2026-08-31.
+screen and lightsleep are offered on the 320 x 240 boards alone. The
+AMOLED's panel sleep holds its touch controller in reset and cuts the
+panel's rails, so a dark there could not wake on a touch, and cycling those
+rails beside an awake IMU is what railed its X and Z on 2026-08-31.
 
 **The dark** (`enter_dark`, `firmware/main/main.c`): the tank saves, the
 backlight and the sound go off, the tank stops drawing, and ten times a
@@ -560,10 +566,19 @@ The dark is lived through at the wake as a deep sleep is - growth at a
 quarter, the full-night badge - and counted once. One log line going dark
 (what asked, the mode, what will wake it) and one waking (what woke it,
 after how long). In lightsleep the chip light-sleeps between looks, woken
-early by BOOT or by the touch controller's INT on GPIO17, armed only while
-it reads high; while a USB host is attached it stays awake instead, because
-light sleep takes the USB port down - so on the bench lightsleep behaves as
-screen, and the log keeps flowing.
+early by BOOT or by the touch controller's INT - GPIO17 on the CYD, GPIO46
+on the Touch-LCD-2 - armed only while it reads high; while a USB host is
+attached it stays awake instead, because light sleep takes the USB port
+down - so on the bench lightsleep behaves as screen, and the log keeps
+flowing.
+
+Light sleep isolates every pin not armed as a wake, so each board names
+the outputs the dark keeps driven through it, and why, in
+`firmware/main/board_pins.h` (`BOARD_DARK_HELD_PINS`): on the CYD the
+touch controller's reset, the amplifier's enable and the backlight; on the
+Touch-LCD-2 the backlight and the TF card's select. A pin a board does not
+have is not listed - the Touch-LCD-2's LCD and touch reset is a net with
+its own pull-up and no GPIO, so it keeps its level with nothing held.
 
 **A pick-up or a tilt:** the IMU stays awake through the dark and is read
 five times a second. The board must first lie still - four reads in a row,
@@ -691,9 +706,9 @@ g); *Gestures, in short* is the keeper's version of this.
 | held | `moving` on two polls in a row: `handled` | counts as attention for the light's idle rule (LIGHTS OUT set to a time) | `tank_handled` |
 | screen down, level, still, 2 s (CYD) | out-of-glass axis over 0.5 g toward the table, in-screen axes under 0.35 g, motion under 1000, 8 polls; once per lie-down | sleeps as a BOOT press | `imu_port_take_face_down`, `main.c` |
 | screen up / picked up, asleep (CYD) | no longer face down on two reads in a row, 0.2 s apart (one read, each 1 s of the deepsleep mode's grace) | wakes in place - after a sleep that began face down | `imu_port_face_down_now`, `enter_dark` |
-| picked up or tilted, dark (CYD) | still for ~1 s sets the rest pose; then off it by 2500 (~0.15 g) on two reads in a row, 0.2 s apart; not in a dark begun face down | wakes in place | `imu_port_rest_moved`, `enter_dark` |
-| a touch, dark (CYD) | a finger on the glass, after the glass was seen clear; not in a dark begun face down | wakes in place; that touch does nothing in the tank | `touch_port_finger_now`, `touch_port_swallow` |
-| BOOT, short press | the button (GPIO0), at release | sleep - on the CYD the dark, which a press ends; in the deepsleep mode a press within the 20-minute grace wakes in place, and after it BOOT boots | `sleep_button_poll`, `enter_sleep_for` |
+| picked up or tilted, dark (320 x 240) | still for ~1 s sets the rest pose; then off it by 2500 (~0.15 g) on two reads in a row, 0.2 s apart; not in a dark begun face down | wakes in place | `imu_port_rest_moved`, `enter_dark` |
+| a touch, dark (320 x 240) | a finger on the glass, after the glass was seen clear; not in a dark begun face down | wakes in place; that touch does nothing in the tank | `touch_port_finger_now`, `touch_port_swallow` |
+| BOOT, short press | the button (GPIO0), at release | sleep - on a 320 x 240 board the dark, which a press ends; in the deepsleep mode a press within the 20-minute grace wakes in place, and after it BOOT boots | `sleep_button_poll`, `enter_sleep_for` |
 | BOOT held + a tap | a touch landing while BOOT is down | the *Reset tank?* prompt | `sleep_button_poll` |
 | double-tap the glass | two quick taps, then a pause (LIGHTS OUT on DOUBLE-TAP, the default) | the tank light on / off, saved | `tank.c` (`light_manual_off`) |
 
@@ -770,8 +785,8 @@ touch and the colours right - and merged here onto today's main
 has one.
 
 It shares everything in `CONFIG_POCKET_TANK_320X240` with the CYD - the
-tank, the pages, the settings rows, no updates over Wi-Fi - and its own
-`CONFIG_POCKET_TANK_WST_320X240` carries the rest: its pins
+tank, the pages, the settings rows, the dark, no updates over Wi-Fi - and
+its own `CONFIG_POCKET_TANK_WST_320X240` carries the rest: its pins
 (`firmware/main/board_pins.h`), the ST7789 through the shared SPI display
 port (`display_port_spi.c`, the TF card's select held high off the panel's
 bus) and the CST816D (`touch_port_ft3168.c`, landscape from the driver with
@@ -781,14 +796,41 @@ no PWR key; no clock chip.
 **Settings.** Its IMU senses handling - the light's idle rule - but does not
 turn the picture (`CONFIG_POCKET_TANK_IMU_AUTO_FLIP=n`: with the AMOLED's
 axes it flipped back and forth in the hand), so its settings page has the
-SCREEN row (UPRIGHT / FLIPPED) where the CYD with an IMU has ROTATION. It
-has no SLEEP row: it sleeps as upstream's boards do (deepsleep, the
-default), BOOT its sleep key - a press within the 20-minute grace wakes it
-in place, and after it BOOT boots. What its sleep draws is not measured.
-Nothing holds its backlight pin (GPIO1) through the grace's light sleep or
-the deep sleep after it, as the CYD's dark holds GPIO45, and the panel
-gets DISPOFF, not SLPIN; if the glass glows or the night costs more than
-it should, those are the first two things to look at.
+SCREEN row (UPRIGHT / FLIPPED) where the CYD with an IMU has ROTATION, and
+under it the SLEEP row, as every 320 x 240 board has.
+
+**Sleep** (2026-10-08). Its sleep is the dark, as the CYD's (*Sleep*), on
+lightsleep as shipped (`sdkconfig.defaults.wst`): BOOT, the director's
+sleeps and the SLEEP row work as on the CYD, and a touch, a pick-up or a
+tilt, BOOT or the director's timer light it again where it was. Until that
+day it slept as upstream's boards do, deep after the 20-minute grace, and
+only BOOT brought it back; a Touch-LCD-2 built for deepsleep still does,
+and so does one built from an sdkconfig made before then, which keeps the
+deepsleep it holds - the defaults only fill in what an sdkconfig lacks, so
+delete it first (*Building and flashing*, below).
+Face down does not sleep it: the gesture needs the axis out of the glass,
+and this QMI8658's axes are not measured (`POCKET_TANK_IMU_FACE_DOWN_SLEEP`
+stays off). In the dark's light sleep it keeps its backlight (GPIO1) low
+and the TF card's select (GPIO41) high (`BOARD_DARK_HELD_PINS`); the LCD's
+and touch panel's reset is one net with its own pull-up and no GPIO, so
+nothing needs holding there. The CST816D's INT, GPIO46, is armed as a
+light-sleep wake as the CYD's GPIO17 is. GPIO46 is a strapping pin, but a
+strap is sampled only at a chip reset, when the pads are back in their
+reset state, and the dark only reads it, with a pull-up: nothing drives
+it. The CST816 family can stop answering I2C while it idles; in the dark a
+read it does not answer is no finger, and is passed over without a log
+line (`touch_port_finger_now` probes its address first).
+
+What only its own hardware can confirm, since nobody here has one:
+
+- **that GPIO46 falls under a finger and wakes the light sleep.** Without
+  it a tap shorter than the 0.1 s between looks can be missed - a held one
+  cannot, so the dark still wakes on a touch;
+- **that the CST816D answers through the dark,** or, if it dozes, that a
+  touch brings it back in time for the next look;
+- **what the dark draws.** The panel gets DISPOFF, not SLPIN, and the IMU
+  stays awake for the pick-up; if the glass glows or the cell drains faster
+  than it should, the backlight's hold and those two are where to look.
 
 **Building and flashing.** Its defaults are `firmware/sdkconfig.defaults.wst`,
 on top of `sdkconfig.defaults` as the CYD's are, into its own build

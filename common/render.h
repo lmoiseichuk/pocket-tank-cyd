@@ -333,7 +333,7 @@ enum { SET_TAP_NONE = 0, SET_TAP_CLOSE = 1, SET_TAP_BRIGHT = 2, SET_TAP_VOLUME =
        SET_TAP_FEED = 8,        /* AUTO FEED (0.3.2): *value 1 = ON; applied and marked for the save */
        SET_TAP_ROTATE = 9,      /* ROTATION (0.3.2): *value 1 = locked; applied and marked for the save */
        SET_TAP_FLIP = 10,       /* this fork, a 320x240 board with no IMU turning the picture: SCREEN UPRIGHT / FLIPPED (below) */
-       SET_TAP_SLEEP = 11 };    /* this fork, the CYD not built for deepsleep: SLEEP NEVER / SCREEN / LIGHT (below) */
+       SET_TAP_SLEEP = 11 };    /* this fork, a 320x240 board not built for deepsleep: SLEEP NEVER / SCREEN / LIGHT (below) */
 /* (this fork) the platforms test these in if-chains, not a switch, so two
    equal values would compile without a word: the fork's stay past upstream's */
 _Static_assert(SET_TAP_FLIP > SET_TAP_ROTATE && SET_TAP_FLIP > SET_TAP_SCREEN && SET_TAP_FLIP > SET_TAP_UPDATES && SET_TAP_SLEEP > SET_TAP_FLIP,
@@ -349,7 +349,7 @@ void render_settings_set_flip(bool flipped);
  * ROTATION. The platform says whether an IMU answered. The choice is made at
  * run time, where upstream picks SCREEN or ROTATION by the board (TANK_WORN). */
 void render_settings_set_imu(bool imu);
-/* Under it on the CYD, IMU or not, the SLEEP row (2026-10-08): what every way into sleep
+/* Under it on a 320x240 board, IMU or not, the SLEEP row (2026-10-08): what every way into sleep
  * does - BOOT's short press, the face-down gesture, the PWR key, the
  * director's sleeps. NEVER ignores them all, SCREEN goes dark with the chip
  * awake, LIGHT goes dark and light-sleeps between its looks at the glass.

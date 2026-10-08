@@ -34,7 +34,7 @@
 #include "esp_ota_ops.h"
 #include "brightness.h"
 #include "orientation.h"
-#include "sleep_setting.h"                 /* (this fork) the CYD's SLEEP row: SLEEP_SETTING_ROW */
+#include "sleep_setting.h"                 /* (this fork) the 320x240 boards' SLEEP row: SLEEP_SETTING_ROW */
 #include "batlog.h"
 #include "codec_port.h"
 #include "progression.h"
@@ -93,10 +93,10 @@ static const char *s_sleep_why = "?";      /* what asked for the next sleep, for
 #define SLEEP_MODE_NAME "deepsleep"
 #define SLEEP_MODE_DEEP 1
 #endif
-/* (this fork) the CYD's SLEEP row (sleep_setting.h, 2026-10-08): on a CYD
- * built for none, screen or lightsleep the mode is the keeper's, chosen at
- * run time, and the build's mode only its factory default. The dark is
- * compiled for every such build - one built for none too, since SCREEN and
+/* (this fork) the 320x240 boards' SLEEP row (sleep_setting.h, 2026-10-08):
+ * on a CYD or a Touch-LCD-2 built for none, screen or lightsleep the mode is
+ * the keeper's, chosen at run time, and the build's mode only its factory
+ * default. The dark is compiled for every such build - one built for none too, since SCREEN and
  * LIGHT are a tap away - and the tests of the build's mode below become
  * tests of the choice. The name in the log lines is the choice's. */
 #ifdef SLEEP_SETTING_ROW
@@ -348,7 +348,7 @@ static void enter_sleep_for(int wake_after_s) {
     if (!by_face && imu_port_face_down_now() == 1) by_face = true;
 #endif
 #ifdef SLEEP_SETTING_ROW
-    /* (this fork) the CYD: what the SLEEP row says - NEVER is the none mode's
+    /* (this fork) a 320x240 board: what the SLEEP row says - NEVER is the none mode's
        line, SCREEN and LIGHT the dark (which of the two, it asks itself) */
     if (sleep_setting() == SET_SLEEP_NEVER) {
         ESP_LOGI(TAG, "sleep (%s) ignored: the SLEEP row says NEVER, so the tank never goes dark", s_sleep_why);
@@ -366,7 +366,7 @@ static void enter_sleep_for(int wake_after_s) {
     int pct0 = battery_pct(), mv0 = battery_port_vbat_mv();
     /* (this fork, 2026-10-08) the hour is for a board whose night is the
        clockless power-off: a PMIC and no clock chip. A board with no PMIC -
-       the Touch-LCD-2, or the CYD built for deepsleep - has no power-off to
+       a CYD or a Touch-LCD-2 built for deepsleep - has no power-off to
        sync after; its night is a deep sleep with the chip's clock running,
        so it keeps the 20 minutes the boards with a clock chip keep. Tested
        on the RTC alone, it light-slept an hour at the grace's ~4.7 mA. */
@@ -505,11 +505,13 @@ static void deep_sleep_now(int wake_after_s) {
 
 #if CONFIG_POCKET_TANK_SLEEP_SCREEN || CONFIG_POCKET_TANK_SLEEP_LIGHT || SLEEP_SETTING_ROW
 /* The dark (2026-10-08): the screen and lightsleep modes' sleep, with no
- * deep sleep after it. The CYD in its case cannot reach BOOT, and deep sleep
- * hears nothing else, so once the grace ran out the tank stayed dark for
- * good. Here the tank saves, the backlight and the sound go off, and the tank
- * task stops drawing and waits in this loop, RAM alive, for as long as it
- * takes. It lights again, where it was, on:
+ * deep sleep after it, on the 320x240 boards. The CYD in its case cannot
+ * reach BOOT, and deep sleep hears nothing else, so once the grace ran out
+ * the tank stayed dark for good; the Touch-LCD-2 has it too (this fork,
+ * 2026-10-08), so a touch wakes it rather than BOOT alone. Here the tank
+ * saves, the backlight and the sound go off, and the tank task stops
+ * drawing and waits in this loop, RAM alive, for as long as it takes. It
+ * lights again, where it was, on:
  *  - a touch: a finger on the glass, once the glass has been seen clear (a
  *    finger resting there as it went dark is not one).
  *  - motion: picked up or tilted off the pose it came to rest in
@@ -520,8 +522,8 @@ static void deep_sleep_now(int wake_after_s) {
  *    is its wake - turned over or picked up - as it was in the grace, but
  *    on two reads in a row, where the grace took one.
  *  - BOOT, the PMIC's PWR key, or the director's timer (`deepsleep N`).
- * It looks every DARK_SLICE_US. In lightsleep (on the CYD, the SLEEP row's
- * LIGHT) the chip light-sleeps between looks, woken early by BOOT or the
+ * It looks every DARK_SLICE_US. In lightsleep (the SLEEP row's LIGHT) the
+ * chip light-sleeps between looks, woken early by BOOT or the
  * touch controller's INT line; in screen (SCREEN) - and in lightsleep while
  * a USB host is attached, since light sleep takes the USB port down and the
  * bench would lose the log - it waits awake. The
@@ -533,12 +535,16 @@ static void deep_sleep_now(int wake_after_s) {
 #define DARK_FACE_UP_READS 2        /* a dark begun face down: not face down on this many IMU reads in a row, 0.2 s apart */
 
 #if CONFIG_POCKET_TANK_SLEEP_LIGHT || SLEEP_SETTING_ROW
-/* (this fork) Only the CYD gets here: SLEEP_LIGHT depends on its symbol in
-   Kconfig and SLEEP_SETTING_ROW is defined on it alone, so the pins held
-   below are the CYD's (the Touch-LCD-2 sleeps deep and has no dark). */
+/* (this fork) Only a 320x240 board gets here: SLEEP_LIGHT depends on
+   POCKET_TANK_320X240 in Kconfig and SLEEP_SETTING_ROW is defined on those
+   boards alone, so the pins held below are always one of their lists in
+   board_pins.h (BOARD_DARK_HELD_PINS, 2026-10-08). */
+#ifndef BOARD_DARK_HELD_PINS
+#error "a board with the dark names the outputs it holds through light sleep: BOARD_DARK_HELD_PINS in board_pins.h"
+#endif
 /* whether the dark light-sleeps between its looks: always in a lightsleep
-   build; (this fork) on the CYD, when the SLEEP row says LIGHT - SCREEN
-   waits awake, as the screen build does */
+   build; (this fork) on a 320x240 board, when the SLEEP row says LIGHT -
+   SCREEN waits awake, as the screen build does */
 static bool dark_light_sleeps(void) {
 #ifdef SLEEP_SETTING_ROW
     return sleep_setting() == SET_SLEEP_LIGHT;
@@ -549,18 +555,15 @@ static bool dark_light_sleeps(void) {
 /* Light sleep isolates every pad not armed as a wake (ESP-IDF's
  * ESP_SLEEP_GPIO_RESET_WORKAROUND, on for the S3): input, output and pulls
  * off, so for each slice an output is left to whatever resistor the board
- * puts on it. Three outputs the dark relies on must keep their level:
- *  - the touch controller's reset (GPIO18, driven high): left floating, it
- *    could reset the FT6336 in every slice, and the read after the slice
- *    would find no chip - no touch wake, and an I2C error ten times a second;
- *  - the amplifier's enable (GPIO1, off is high on the CYD);
- *  - the backlight (GPIO45, LEDC at duty 0: with the clock stopped in light
- *    sleep the pad holds the low it was putting out).
+ * puts on it. The outputs the dark relies on must keep their level: each
+ * board names its own, and says why, in board_pins.h (BOARD_DARK_HELD_PINS:
+ * on the CYD the touch reset, the amplifier's enable and the backlight; on
+ * the Touch-LCD-2 the backlight and the TF card's select).
  * gpio_sleep_sel_dis keeps a pad's awake configuration through light sleep;
  * gpio_sleep_sel_en at the wake hands it back to the isolation. The other
  * pads were isolated in every 1 s slice of the old grace, and the panel, the
  * I2C bus and the IMU answered after it on the bench (CYD.md). */
-static const gpio_num_t DARK_HELD_PINS[] = { PIN_TP_RST, PIN_AMP_EN, PIN_LCD_BL };
+static const gpio_num_t DARK_HELD_PINS[] = { BOARD_DARK_HELD_PINS };
 static void dark_hold_pins(bool hold) {
     for (size_t i = 0; i < sizeof DARK_HELD_PINS / sizeof DARK_HELD_PINS[0]; i++) {
         if (hold) gpio_sleep_sel_dis(DARK_HELD_PINS[i]);
@@ -610,8 +613,8 @@ static void enter_dark(int wake_after_s, bool by_face) {
     int touch_int = by_face ? -1 : touch_port_wake_gpio();
     /* whether this dark light-sleeps, asked once: the pins it holds at the
        start are the pins it lets go at the end, whatever the SLEEP row says
-       by then. (this fork) On the CYD a change of the row takes effect at
-       the next sleep. */
+       by then. (this fork) On a 320x240 board a change of the row takes
+       effect at the next sleep. */
 #if CONFIG_POCKET_TANK_SLEEP_LIGHT || SLEEP_SETTING_ROW
     bool light = dark_light_sleeps();
     const char *usb = light && usb_serial_jtag_is_connected() ? ", awake while a USB host is attached" : "";
@@ -623,7 +626,7 @@ static void enter_dark(int wake_after_s, bool by_face) {
              s_sleep_why, SLEEP_MODE_NAME, usb, by_face ? "face up" : "a touch, motion",
              wake_after_s > 0 ? ", the timer" : "", pct0, mv0);
 #if CONFIG_POCKET_TANK_SLEEP_LIGHT || SLEEP_SETTING_ROW
-    if (light) dark_hold_pins(true);            /* touch reset, amp and backlight keep their level in each slice */
+    if (light) dark_hold_pins(true);            /* the board's held outputs (board_pins.h) keep their level in each slice */
 #endif
     int64_t t0 = esp_timer_get_time();
     int64_t until = wake_after_s > 0 ? t0 + (int64_t)wake_after_s * 1000000 : 0;
@@ -680,7 +683,7 @@ void device_sleep(int wake_after_s) { s_sleep_why = "the director"; enter_sleep_
  * grace ends in). No PMIC: deep sleep. */
 static void enter_poweroff(void) {
 #ifndef SLEEP_MODE_DEEP
-    enter_sleep_for(0);   /* none (the CYD: NEVER): ignored there, with its line; screen, lightsleep: the dark, as any sleep */
+    enter_sleep_for(0);   /* none (a 320x240 board: NEVER): ignored there, with its line; screen, lightsleep: the dark, as any sleep */
     return;
 #endif
     ESP_LOGI(TAG, "power-off now: saving tank, PMIC soft cut (the PWR key boots)");
@@ -882,7 +885,7 @@ static void tank_task(void *arg) {
         if (imu_port_handled()) tank_handled(&tank);   /* ... and the light stays on (two polls of motion: a bump on the desk is not a pick-up) */
 #if CONFIG_POCKET_TANK_IMU_FACE_DOWN_SLEEP
         /* screen down and still for 2 s: the sleep key. What it does is the
-           sleep mode's - on the CYD the SLEEP row's, where NEVER ignores it
+           sleep mode's - on a 320x240 board the SLEEP row's, where NEVER ignores it
            with its line, as it does every other way into sleep. */
         if (imu_port_take_face_down()) {
 #ifdef SLEEP_MODE_DEEP
@@ -934,7 +937,7 @@ static void tank_task(void *arg) {
           else if (w == SET_TAP_FEED) ESP_LOGI(TAG, "settings: auto feed %s", v ? "ON" : "OFF (the keeper feeds; a starving fish loses trust)");
           else if (w == SET_TAP_ROTATE) ESP_LOGI(TAG, "settings: rotation %s", v ? (tank.orient_inv ? "LOCKED (turned over)" : "LOCKED (upright)") : "unlocked (the picture follows the tank)");
           else if (w == SET_TAP_FLIP) orientation_set(v != 0);              /* the CYD's SCREEN row (no IMU) */
-          else if (w == SET_TAP_SLEEP) sleep_setting_set(v); }              /* the CYD's SLEEP row: NEVER / SCREEN / LIGHT */
+          else if (w == SET_TAP_SLEEP) sleep_setting_set(v); }              /* the 320x240 boards' SLEEP row: NEVER / SCREEN / LIGHT */
         if (touch_port_take_update() == UPD_TAP_CHECK) request_update();   /* the updates page's CHECK: save, restart into update mode */
         { int r = touch_port_take_shop();                               /* the shop's UNLOCK / MOVE / SELL */
           if (r >= SHOP_TAP_SELL) {                                     /* sold back: the refund, the piece gone, the row for sale again */
@@ -1001,7 +1004,7 @@ static void tank_task(void *arg) {
 #if CONFIG_POCKET_TANK_320X240
                 /* (this fork) a 320x240 board's row is chosen at run time (common/render.h):
                    SCREEN with no IMU, ROTATION with one in a face-down build; SLEEP under
-                   it on the CYD, but not on a deepsleep build (the Touch-LCD-2 is one) */
+                   it, but not on a deepsleep build */
                 render_settings_set_flip(orientation_flipped());
 #if CONFIG_POCKET_TANK_IMU_FACE_DOWN_SLEEP
                 render_settings_set_imu(s_imu);
@@ -1192,7 +1195,7 @@ void app_main(void) {
       if (carried) ESP_LOGI(TAG, "batlog: %d samples carried through the reset (director `batlog` reads them)", carried); }
     brightness_init();
     orientation_init();
-    sleep_setting_init();                    /* (this fork) the CYD's SLEEP row */
+    sleep_setting_init();                    /* (this fork) the 320x240 boards' SLEEP row */
 #ifdef SLEEP_SETTING_ROW
     ESP_LOGI(TAG, "sleep mode: %s (%s)", SLEEP_MODE_NAME, sleep_setting_saved() ? "chosen in settings" : "the build's default, nothing chosen in settings");
 #endif

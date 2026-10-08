@@ -159,8 +159,8 @@ menu "pocket-tank"
             Screen down and still for 2 s is a short press of the sleep key;
             turned face up, the tank wakes in place (in the deepsleep mode,
             only within its 20-minute grace). What the gesture does follows
-            the sleep mode - on the CYD the settings page's SLEEP row, whose
-            NEVER ignores it as it does every other way into sleep.
+            the sleep mode - on the 320x240 boards the settings page's SLEEP
+            row, whose NEVER ignores it as it does every other way into sleep.
             Once an IMU answers, the compact settings page's SCREEN row is
             ROTATION (the IMU turns the picture itself).
     choice POCKET_TANK_SLEEP_MODE
@@ -175,22 +175,25 @@ menu "pocket-tank"
             up instead, after a face-down sleep), BOOT, the PWR key, or the
             director's timer lights it again where it was. The touch that
             wakes it does nothing in the tank. Made for the CYD, whose case
-            covers BOOT, and offered only there: the AMOLED's panel sleep
+            covers BOOT, and offered on the 320x240 boards (this fork,
+            2026-10-08: the Touch-LCD-2's too, which wakes on its CST816D's
+            INT as the CYD on its FT6336's): the AMOLED's panel sleep
             holds its touch controller in reset and cuts the panel's rails,
             so its dark could not wake on a touch, and cycling those rails
             beside an awake IMU is what railed its X and Z on 2026-08-31.
-            On the CYD, none, screen and lightsleep are only the factory
-            default: the settings page's SLEEP row (NEVER / SCREEN / LIGHT)
-            changes the mode at run time, and the choice is kept in NVS
-            ("tank"/"sleep"). deepsleep is a build choice only, with no row.
+            On the 320x240 boards, none, screen and lightsleep are only the
+            factory default: the settings page's SLEEP row (NEVER / SCREEN /
+            LIGHT) changes the mode at run time, and the choice is kept in
+            NVS ("tank"/"sleep"). deepsleep is a build choice only, with no
+            row.
         config POCKET_TANK_SLEEP_NONE
             bool "none: never goes dark; every way into sleep is ignored, with a log line"
         config POCKET_TANK_SLEEP_SCREEN
             bool "screen: dark, the CPU running"
-            depends on POCKET_TANK_CYD_320X240
+            depends on POCKET_TANK_320X240
         config POCKET_TANK_SLEEP_LIGHT
             bool "lightsleep: dark, light-sleeping between looks; never deep sleep"
-            depends on POCKET_TANK_CYD_320X240
+            depends on POCKET_TANK_320X240
             help
                 While a USB host is attached the chip stays awake instead,
                 as in screen: light sleep takes the USB port down.

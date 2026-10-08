@@ -546,7 +546,7 @@ void touch_port_poll(tank_t *t) {
         if (r == SET_TAP_CLOSE) { s_set = false; s_ms = true; s_back = true; }   /* back to the milestones page (2026-09-16); the release is spent */
         else if (r == SET_TAP_UPDATES) { s_set = false; s_upd = true; s_back = true; ESP_LOGI(TAG, "updates page up"); }
         else if (r == SET_TAP_BRIGHT || r == SET_TAP_VOLUME || r == SET_TAP_LIGHT || r == SET_TAP_IDLE || r == SET_TAP_FEED || r == SET_TAP_ROTATE
-                 || r == SET_TAP_FLIP || r == SET_TAP_SLEEP) { s_set_what = r; s_set_val = v; }   /* FLIP, SLEEP: the CYD's rows */
+                 || r == SET_TAP_FLIP || r == SET_TAP_SLEEP) { s_set_what = r; s_set_val = v; }   /* FLIP, SLEEP: the 320x240 boards' rows */
     }
     if (s_upd && !s_cf && !su) {                             /* the UPDATES page: CHECK (main restarts), FORGET, CLOSE */
         int r = updates_page_touch(tx, ty, touched);
@@ -754,20 +754,44 @@ void touch_port_show_battery(bool on) { s_bat = on; if (on) { s_bat_us = esp_tim
 
 /* ---- the dark (touch_port.h; main.c's enter_dark) ---- */
 bool touch_port_finger_now(void) {
-    if (!s_tp || esp_lcd_touch_read_data(s_tp) != ESP_OK) return false;   /* no answer: no finger */
+    if (!s_tp) return false;
+#if CONFIG_POCKET_TANK_WST_320X240
+    /* (this fork, 2026-10-08) The Touch-LCD-2's CST816D can stop answering
+       I2C while it idles - the CST816 family dozes after a few seconds with
+       no finger, and wakes on a touch. A read it does not answer is no
+       finger, but the CST816S driver and each I2C layer under it log an
+       error for it ("I2C read failed", "i2c transaction failed", the NACK):
+       a handful of lines ten times a second, for as long as the dark lasts. A probe of its address first is silent on a NACK (only a
+       stuck bus logs), so a dozing chip is passed over quietly, and the read
+       goes ahead only when it answers. */
+    if (i2c_master_probe(board_i2c_bus(), I2C_ADDR_CST816D, 20) != ESP_OK) return false;
+#endif
+    if (esp_lcd_touch_read_data(s_tp) != ESP_OK) return false;   /* no answer: no finger */
     esp_lcd_touch_point_data_t point[1];
     uint8_t n = 0;
     return esp_lcd_touch_get_data(s_tp, point, &n, 1) == ESP_OK && n > 0;
 }
 void touch_port_swallow(void) { s_swallow = true; }
-#if CONFIG_POCKET_TANK_CYD_320X240
-/* The FT6336's INT on GPIO17 (board_pins.h), which the game never uses: it
- * polls. Not yet seen on the bench, and the driver never sets the chip's
- * G_MODE, so whether it holds low through a touch or pulses is the chip's
- * default - a held line is a sure level wake, a pulse a likely one. A
- * floating or dead line costs nothing: the pull-up keeps it high, main.c
- * never arms a line that already reads low, and the dark's own reads still
- * find the finger. */
+#if CONFIG_POCKET_TANK_320X240
+/* The touch controller's INT, PIN_TP_INT in board_pins.h, which the game
+ * never uses: it polls. A floating or dead line costs nothing: the pull-up
+ * keeps it high, main.c never arms a line that already reads low, and the
+ * dark's own reads still find the finger.
+ * The CYD: the FT6336's INT on GPIO17. Not yet seen on the bench, and the
+ * driver never sets the chip's G_MODE, so whether it holds low through a
+ * touch or pulses is the chip's default - a held line is a sure level wake,
+ * a pulse a likely one.
+ * (this fork, 2026-10-08) The Touch-LCD-2: the CST816D's INT on GPIO46,
+ * which pulses low on a touch by the CST816 family's default - a likely
+ * wake, as the CYD's pulse would be; unseen here, since nobody here has the
+ * board. GPIO46 is one of the ESP32-S3's strapping pins (with GPIO0 it
+ * picks the boot mode), and setting it up here is safe: a strap is sampled
+ * only at a chip reset, when every pad is back to its reset state, so what
+ * the running app does with the pad cannot reach the next one; and this
+ * only reads it, with a pull-up towards the level the touch INT idles at -
+ * nothing here drives it. Any GPIO can wake the S3 from light sleep, an
+ * RTC pin or not (gpio_wakeup_enable), so GPIO46, which is not one, is
+ * armed as the CYD's GPIO17 is. */
 int touch_port_wake_gpio(void) {
     static bool configured;
     if (!s_tp) return -1;
@@ -780,6 +804,5 @@ int touch_port_wake_gpio(void) {
     return PIN_TP_INT;
 }
 #else
-int touch_port_wake_gpio(void) { return -1; }    /* the AMOLED's INT is not in use, and display_port_sleep holds its touch in reset;
-                                                    the Touch-LCD-2 sleeps deep, so it has no dark to wake from */
+int touch_port_wake_gpio(void) { return -1; }    /* the AMOLED's INT is not in use, and display_port_sleep holds its touch in reset */
 #endif
