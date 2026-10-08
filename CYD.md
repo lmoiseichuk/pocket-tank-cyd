@@ -41,9 +41,9 @@ Against upstream's main (`git log upstream/main..main`):
 - **What the CYD goes without.** No updates over Wi-Fi and no UPDATES
   button, no battery pill or page, no PWR key, no clock chip (*What the CYD
   does not have*).
-- **Two rules scaled to the smaller tank, on the CYD only.** The model's
-  distance bands scale with the tank's width, and the algae films the glass
-  at the 1.8's pace per cell (*What the port changes*).
+- **Two rules scaled to the smaller tank, on the 320 x 240 boards only.**
+  The model's distance bands scale with the tank's width, and the algae
+  films the glass at the 1.8's pace per cell (*What the port changes*).
 - **The simulator's fourth world.** `make -C sim 320X240=1` builds
   `fishsim-320x240`, and `make -C sim check-all` runs the selftests in
   all four worlds.
@@ -766,8 +766,8 @@ a QMI8658 IMU on one I2C bus. It came to the fork as pull request #2 from
 adampog, who ran it on the bench on the fork as it was before upstream's
 v0.3.3 - 30-34 fps, a 16 ms flush at 80 MHz, a decision every ~3.5 s, the
 touch and the colours right - and merged here onto today's main
-(2026-10-08). It is built here, every image, but not run: nobody here has
-one.
+(2026-10-08). Its image is built here but has never run here: nobody here
+has one.
 
 It shares everything in `CONFIG_POCKET_TANK_320X240` with the CYD - the
 tank, the pages, the settings rows, no updates over Wi-Fi - and its own
@@ -784,7 +784,11 @@ axes it flipped back and forth in the hand), so its settings page has the
 SCREEN row (UPRIGHT / FLIPPED) where the CYD with an IMU has ROTATION. It
 has no SLEEP row: it sleeps as upstream's boards do (deepsleep, the
 default), BOOT its sleep key - a press within the 20-minute grace wakes it
-in place, and after it BOOT boots.
+in place, and after it BOOT boots. What its sleep draws is not measured.
+Nothing holds its backlight pin (GPIO1) through the grace's light sleep or
+the deep sleep after it, as the CYD's dark holds GPIO45, and the panel
+gets DISPOFF, not SLPIN; if the glass glows or the night costs more than
+it should, those are the first two things to look at.
 
 **Building and flashing.** Its defaults are `firmware/sdkconfig.defaults.wst`,
 on top of `sdkconfig.defaults` as the CYD's are, into its own build
@@ -802,7 +806,10 @@ idf.py -B build_wst -D SDKCONFIG=build_wst/sdkconfig -p <port> -b 921600 flash
 
 The defaults only fill in what an sdkconfig lacks: after a defaults file
 changes, delete `build_wst/sdkconfig` before building. `PT_BOARD` names the
-image `wst_320x240`.
+image `wst_320x240`. An sdkconfig from the pull request's own build, which
+named the board `CONFIG_POCKET_TANK_BOARD_TLCD2`, keeps its board:
+`firmware/main/sdkconfig.rename` carries the old name across (and the
+CYD's old `CONFIG_POCKET_TANK_BOARD_CYD_320X240` the same way).
 
 ## Syncing with upstream
 
@@ -822,9 +829,12 @@ upstream's text but for one block.
    git merge upstream/main
    ```
 
-2. **Resolve.** The CYD lives in `#ifdef CONFIG_POCKET_TANK_320X240`
-   blocks (and the CYD's own hardware in `CONFIG_POCKET_TANK_CYD_320X240`), so a conflict is usually upstream's change and the fork's block
-   side by side, and both stay. Where conflicts land:
+2. **Resolve.** The 320 x 240 layout lives in
+   `#ifdef CONFIG_POCKET_TANK_320X240` blocks, and each board's own
+   hardware under its own symbol (`CONFIG_POCKET_TANK_CYD_320X240`,
+   `CONFIG_POCKET_TANK_WST_320X240`), so a conflict is usually upstream's
+   change and the fork's block side by side, and both stay. Where
+   conflicts land:
    - `common/render.h` - the CYD's page layouts are one block at the end of
      the file that redefines upstream's names, so upstream's own lines stay
      as written; a new layout name upstream adds may need a CYD value there.
@@ -833,9 +843,12 @@ upstream's text but for one block.
    - `common/render.c` - the CYD's paths for the card, the badges, the shop
      coin and the settings rows.
    - `firmware/main/main.c` - the IMU, the sleep modes and the dark, the
-     SCREEN and SLEEP rows, and the update paths the CYD leaves out.
+     SCREEN and SLEEP rows, the update paths the CYD leaves out, and the
+     sleep's grace (20 minutes on a board with no PMIC, where upstream
+     tests the clock chip alone).
    - `sim/main.c` - the CYD's selftest expectations and snapshots.
-   - `firmware/main/touch_port_ft3168.c` - the FT6336's init and its turn.
+   - `firmware/main/touch_port_ft3168.c` - the FT6336's and the CST816D's
+     init, and the CYD's turn.
    - `README.md` - take upstream's text and put the fork's block back under
      the title; `git diff upstream/main -- README.md` shows that block and
      nothing else.
@@ -862,7 +875,8 @@ upstream's text but for one block.
 
    Some changes merge cleanly and are still wrong:
    - a new question in `display_port.h` needs its answer in
-     `display_port_ili9341.c`, or the CYD does not link;
+     `display_port_spi.c`, the CYD's and the Touch-LCD-2's SPI display
+     port, or neither links;
    - a new badge (`assets/icons/ms_*.png`) gets its 24 px copy when
      `tools/gen_icons.py` runs, but it also needs its pair in `badge_art()`'s
      table in `common/render.c`. Without one it draws at 32 px in the CYD's

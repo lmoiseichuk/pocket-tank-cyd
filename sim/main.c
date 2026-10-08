@@ -1381,7 +1381,7 @@ static int selftest_update(void) {
     /* the settings page's UPDATES button, and the UPDATES page's taps */
     { int v = 0, r;
       render_settings_touch(&tank, PG_X(SET_UPD_X + 40), PG_Y(SET_FOOT_Y + 12), true, &v); r = render_settings_touch(&tank, PG_X(SET_UPD_X + 40), PG_Y(SET_FOOT_Y + 12), false, &v);
-#ifdef CONFIG_POCKET_TANK_320X240 /* (this fork) the CYD has no update channel, so no UPDATES button: its spot is the version line */
+#ifdef CONFIG_POCKET_TANK_320X240 /* (this fork) a 320x240 board has no update channel, so no UPDATES button: its spot is the version line */
       EXPECT(r != SET_TAP_UPDATES, "settings: the CYD has an UPDATES button (%d)", r);
 #else
       EXPECT(r == SET_TAP_UPDATES, "settings: the UPDATES button -> %d", r);

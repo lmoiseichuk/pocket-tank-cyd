@@ -533,6 +533,9 @@ static void deep_sleep_now(int wake_after_s) {
 #define DARK_FACE_UP_READS 2        /* a dark begun face down: not face down on this many IMU reads in a row, 0.2 s apart */
 
 #if CONFIG_POCKET_TANK_SLEEP_LIGHT || SLEEP_SETTING_ROW
+/* (this fork) Only the CYD gets here: SLEEP_LIGHT depends on its symbol in
+   Kconfig and SLEEP_SETTING_ROW is defined on it alone, so the pins held
+   below are the CYD's (the Touch-LCD-2 sleeps deep and has no dark). */
 /* whether the dark light-sleeps between its looks: always in a lightsleep
    build; (this fork) on the CYD, when the SLEEP row says LIGHT - SCREEN
    waits awake, as the screen build does */

@@ -3740,7 +3740,7 @@ void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, 
 #if TANK_WORN                                    /* the watch: centred under the foot, between the lower corners */
     draw_text_8px(&c, (PAGE_W - ((int)strlen(ver) * 6 - 1)) / 2, SET_FOOT_Y + MSP_CLOSE_H + 2, MSP_DIM, ver);
 #elif defined(CONFIG_POCKET_TANK_320X240)
-    /* (this fork) the CYD: no UPDATES (no update channel), so the version line
+    /* (this fork) a 320x240 board: no UPDATES (no update channel), so the version line
        has the foot left of CLOSE - clipped short of it (6 px a character in
        the 8 px font): the build id's tail is what gives way, the release
        number always shows */
@@ -3751,7 +3751,7 @@ void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, 
     draw_text_8px(&c, SET_LABEL_X + (PAGE_BOWL ? 96 : 0), PAGE_H - 8 - 6, MSP_DIM, ver);
 #endif
     button(&c, SET_CLOSE_X, SET_FOOT_Y, MSP_CLOSE_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "CLOSE", UI_TEXT(2));
-#ifndef CONFIG_POCKET_TANK_320X240 /* (this fork) the CYD has no update channel: no UPDATES (CYD.md) */
+#ifndef CONFIG_POCKET_TANK_320X240 /* (this fork) a 320x240 board has no update channel: no UPDATES (CYD.md) */
     /* UPDATES (2026-09-30, docs/OTA.md): bottom left, the same size as CLOSE */
     button(&c, SET_UPD_X, SET_FOOT_Y, SET_UPD_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "UPDATES", 2);
 #endif
@@ -3769,7 +3769,7 @@ enum { SET_HIT_LIGHT_PREV = 100, SET_HIT_LIGHT_NEXT };
 int render_settings_tap(float x, float y, int *value) {
     x -= PAGE_X; y -= PAGE_Y;                    /* the page's own coordinates */
     if (x >= SET_CLOSE_X - UI(8) && y >= SET_FOOT_Y - UI(4)) return SET_TAP_CLOSE;
-#ifndef CONFIG_POCKET_TANK_320X240 /* (this fork) the CYD has no UPDATES button */
+#ifndef CONFIG_POCKET_TANK_320X240 /* (this fork) a 320x240 board has no UPDATES button */
     if (x < SET_UPD_X + SET_UPD_W + 8 && y >= SET_FOOT_Y - 4) return SET_TAP_UPDATES;
 #endif
     /* the row bands: from a little above each segment down to the next row
@@ -3780,7 +3780,7 @@ int render_settings_tap(float x, float y, int *value) {
     if (y >= SET_SEG_Y(SET_ROW3_Y) - UI(12) && y < SET_SEG_Y(SET_ROW4_Y) - UI(12)) { if (seg < 0) return SET_TAP_NONE; *value = 0; return x < SET_SPAN_MID ? SET_HIT_LIGHT_PREV : SET_HIT_LIGHT_NEXT; }
     if (y >= SET_SEG_Y(SET_ROW4_Y) - UI(12) && y < SET_SEG_Y(SET_ROW5_Y) - UI(12)) { if (two < 0) return SET_TAP_NONE; *value = two == 0; return SET_TAP_FEED; }
 #ifdef CONFIG_POCKET_TANK_320X240
-    /* (this fork) the CYD: SCREEN (no IMU) or ROTATION, then SLEEP (not deepsleep) */
+    /* (this fork) a 320x240 board: SCREEN (no IMU) or ROTATION, then SLEEP (the CYD not built for deepsleep) */
     if (y >= SET_SEG_Y(SET_ROW5_Y) - UI(12) && y < SET_SEG_Y(SET_ROW6_Y) - UI(12)) {
         if (two < 0) return SET_TAP_NONE;
         if (!g_set_imu) { *value = two == 1; return SET_TAP_FLIP; }

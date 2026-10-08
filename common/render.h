@@ -18,7 +18,7 @@
  * tap tests take the frame's, as the touch ports report them. In the
  * rectangle the two are the same thing. */
 #ifdef CONFIG_POCKET_TANK_320X240
-/* this fork, the CYD's 320 x 240: its pages are the design SCALED (ui.h's UI(), 240 / 368),
+/* this fork, a 320 x 240 board's: its pages are the design SCALED (ui.h's UI(), 240 / 368),
  * so the page is UI(448) x UI(368), centred - glass x 14..306. The layouts that use the
  * whole glass instead (the milestones page, the shop, settings: the CYD block at the end
  * of this file) reach past it on both sides. */
@@ -335,9 +335,9 @@ enum { SET_TAP_NONE = 0, SET_TAP_CLOSE = 1, SET_TAP_BRIGHT = 2, SET_TAP_VOLUME =
        SET_TAP_FLIP = 10,       /* this fork, a 320x240 board with no IMU turning the picture: SCREEN UPRIGHT / FLIPPED (below) */
        SET_TAP_SLEEP = 11 };    /* this fork, the CYD not built for deepsleep: SLEEP NEVER / SCREEN / LIGHT (below) */
 /* (this fork) the platforms test these in if-chains, not a switch, so two
-   equal values would compile without a word: the CYD's stay past upstream's */
+   equal values would compile without a word: the fork's stay past upstream's */
 _Static_assert(SET_TAP_FLIP > SET_TAP_ROTATE && SET_TAP_FLIP > SET_TAP_SCREEN && SET_TAP_FLIP > SET_TAP_UPDATES && SET_TAP_SLEEP > SET_TAP_FLIP,
-               "the CYD's settings taps must not reuse upstream's numbers");
+               "the fork's settings taps must not reuse upstream's numbers");
 /* The 320x240 boards' own rows (this fork; no other board draws them). With
  * no IMU to turn the picture - the CYD without its breakout, the Touch-LCD-2,
  * whose IMU senses handling only - the row where the others have ROTATION is
@@ -712,7 +712,7 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
    BRIGHTNESS, VOLUME, the note, LIGHTS OUT, AUTO FEED, then the row chosen at
    run time - SCREEN with no IMU, ROTATION with one (render_settings_set_imu) -
    SLEEP under it on every build but deepsleep (render_settings_set_sleep),
-   and the foot: CLOSE, the version line beside it. No UPDATES: the CYD has no update channel (CYD.md). */
+   and the foot: CLOSE, the version line beside it. No UPDATES: a 320x240 board has no update channel (CYD.md). */
 #undef  SET_TITLE_Y
 #define SET_TITLE_Y   6
 #undef  SET_ROW1_Y
@@ -745,7 +745,7 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
 #undef  SET_ROT_WORD_X
 #define SET_ROT_WORD_X (SET_SEG_X + SET_SEG_W + UI(14))
 _Static_assert(MSP_CLOSE_Y + MSP_CLOSE_H <= TANK_H && SET_SEG_Y(SET_ROW6_Y) + SET_SEG_H < MSP_CLOSE_Y,
-               "the CYD's pages must fit on the glass");
+               "the 320x240 pages must fit on the glass");
 #endif
 
 #endif
