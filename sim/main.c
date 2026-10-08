@@ -2485,11 +2485,19 @@ static int snapshot(const char *prefix, int seconds) {
     tank.fish[1].ms_seen &= ~MS_FIRST_MEAL_FROM_YOU; tank.tank_ms_seen &= ~TMS_FIRST_FULL_NIGHT;
     render_milestones(&tank, fb, TANK_W);
     snprintf(path, sizeof path, "%s_milestones.ppm", prefix); write_ppm(path, fb);
+#ifdef TANK_CYD
+    render_milestones_tap(&tank, PG_X(MSP_NAME_X + 8), PG_Y(MS_TANK_Y));              /* (this fork) the CYD's TANK name: its own column */
+#else
     render_milestones_tap(&tank, PG_X(100), PG_Y(MS_TANK_Y));                          /* TANK's name: the tally, the school drawn over it */
+#endif
     render_milestones(&tank, fb, TANK_W);
     snprintf(path, sizeof path, "%s_milestones_tank.ppm", prefix); write_ppm(path, fb);
     { int n_keep = tank.n_fish; tank.n_fish = 3;                                       /* three of six: the open places dim */
+#ifdef TANK_CYD
+      render_milestones_leave(); render_milestones_tap(&tank, PG_X(MSP_NAME_X + 8), PG_Y(MS_TANK_Y));
+#else
       render_milestones_leave(); render_milestones_tap(&tank, PG_X(100), PG_Y(MS_TANK_Y));
+#endif
       render_milestones(&tank, fb, TANK_W);
       snprintf(path, sizeof path, "%s_milestones_tank3.ppm", prefix); write_ppm(path, fb);
       tank.n_fish = n_keep; }
@@ -2500,7 +2508,11 @@ static int snapshot(const char *prefix, int seconds) {
         tank.sd_unlocks |= SD_ITEM_SHRIMP; tank.tank_ms_bits |= TMS_FULL_SCHOOL; tank.tank_ms_seen = tank.tank_ms_bits & ~TMS_FULL_SCHOOL;
         render_milestones(&tank, fb, TANK_W);
         snprintf(path, sizeof path, "%s_milestones_shrimp.ppm", prefix); write_ppm(path, fb);
+#ifdef TANK_CYD
+        render_milestones_tap(&tank, PG_X(MSP_TPG_X + 12), PG_Y(MS_TANK_Y));             /* (this fork) the CYD's page arrow */
+#else
         render_milestones_tap(&tank, PAGE_X + 426, PAGE_Y + 254 + 20);
+#endif
         render_milestones(&tank, fb, TANK_W);
         snprintf(path, sizeof path, "%s_milestones_shrimp2.ppm", prefix); write_ppm(path, fb);
         render_milestones_leave();
@@ -2574,13 +2586,25 @@ static int snapshot(const char *prefix, int seconds) {
     snprintf(path, sizeof path, "%s_shop.ppm", prefix); write_ppm(path, fb);
     tank.sd_balance = 95; render_shop(&tank, fb, TANK_W);
     snprintf(path, sizeof path, "%s_shop_rich.ppm", prefix); write_ppm(path, fb);
+#ifdef TANK_CYD
+    render_shop_tap(&tank, PG_X(SHOP_ROW_X), PG_Y(SHOP_ROW_Y(1))); render_shop(&tank, fb, TANK_W);   /* (this fork) the CYD's shop rows */
+#else
     render_shop_tap(&tank, PAGE_X + 100, PAGE_Y + 98 + 56 + 20); render_shop(&tank, fb, TANK_W);      /* the snail's row -> its modal */
+#endif
     snprintf(path, sizeof path, "%s_shop_modal.ppm", prefix); write_ppm(path, fb);
     render_shop_leave();
+#ifdef TANK_CYD
+    render_shop_tap(&tank, PG_X(SHOP_ROW_X), PG_Y(SHOP_ROW_Y(0))); render_shop(&tank, fb, TANK_W);
+#else
     render_shop_tap(&tank, PAGE_X + 100, PAGE_Y + 98 + 20); render_shop(&tank, fb, TANK_W);           /* the plant's row -> its modal (the long second line) */
+#endif
     snprintf(path, sizeof path, "%s_shop_plant.ppm", prefix); write_ppm(path, fb);
     render_shop_leave();
+#ifdef TANK_CYD
+    render_shop_tap(&tank, PG_X(SHP_EARN_X + 28), PG_Y(MSP_CLOSE_Y + 8)); render_shop(&tank, fb, TANK_W);
+#else
     render_shop_tap(&tank, PAGE_X + 60, PAGE_Y + 320); render_shop(&tank, fb, TANK_W);                /* HOW TO EARN */
+#endif
     snprintf(path, sizeof path, "%s_shop_earn.ppm", prefix); write_ppm(path, fb);
     render_shop_leave();
     tank.sd_unlocks = SD_ITEM_PLANT | SD_ITEM_SNAIL; tank_plant_place(&tank); tank_snail_place(&tank);
@@ -2629,7 +2653,11 @@ static int snapshot(const char *prefix, int seconds) {
       tank.urchin_grazed_px = 1234; render_stats_card(&tank, RENDER_CARD_URCHIN, fb, TANK_W);
       snprintf(path, sizeof path, "%s_urchin_card.ppm", prefix); write_ppm(path, fb); }
     tank.sd_unlocks = 0; tank.sd_balance = 0;
+#ifdef TANK_CYD
+    render_milestones_tap(&tank, PG_X(MS_BADGE_X(0)), PG_Y(MS_ROW(1) + MS_BADGE_DY));   /* (this fork) the CYD's rows */
+#else
     render_milestones_tap(&tank, PAGE_X + 176 + 16, PAGE_Y + 4 + 40 + 20);           /* fish 1's first badge -> the detail modal */
+#endif
     render_milestones(&tank, fb, TANK_W);
     snprintf(path, sizeof path, "%s_milestone_modal.ppm", prefix); write_ppm(path, fb);
     render_milestones_leave();
@@ -2732,14 +2760,26 @@ static int snapshot(const char *prefix, int seconds) {
         tank.tank_ms_seen = tank.tank_ms_bits;
         render_milestones(&tank, fb, TANK_W);
         snprintf(path, sizeof path, "%s_milestones_fry.ppm", prefix); write_ppm(path, fb);
+#ifdef TANK_CYD
+        render_milestones_tap(&tank, PG_X(MS_BADGE_X(0)), PG_Y(MS_ROW(2) + MS_BADGE_DY));   /* (this fork) the CYD's rows */
+#else
         render_milestones_tap(&tank, PAGE_X + 176 + 16, PAGE_Y + 4 + 2 * 40 + 20);        /* the TRUST gate -> its modal */
+#endif
         render_milestones(&tank, fb, TANK_W);
         snprintf(path, sizeof path, "%s_fry_modal.ppm", prefix); write_ppm(path, fb);
+#ifdef TANK_CYD
+        render_milestones_tap(&tank, PG_X(MS_HOW_X + MSP_HOW_W / 2), PG_Y(MS_HOW_Y + MSP_HOW_H / 2));   /* (this fork) the scaled modal's HOW? */
+#else
         render_milestones_tap(&tank, PAGE_X + 56 + 336 / 2, PAGE_Y + 60 + 156 + 20 + 24 + 32 + 14 - 10 - 16);   /* HOW? -> the tip page */
+#endif
         render_milestones(&tank, fb, TANK_W);
         snprintf(path, sizeof path, "%s_fry_tip.ppm", prefix); write_ppm(path, fb);
         render_milestones_leave();
+#ifdef TANK_CYD
+        render_milestones_tap(&tank, PG_X(MSP_NAME_X + 8), PG_Y(MS_ROW(2) + MS_NAME_DY));   /* (this fork) the CYD's rows */
+#else
         render_milestones_tap(&tank, PAGE_X + 100, PAGE_Y + 4 + 2 * 40 + 10);              /* the name -> the tally */
+#endif
         render_milestones(&tank, fb, TANK_W);
         snprintf(path, sizeof path, "%s_fry_tally.ppm", prefix); write_ppm(path, fb);
         render_milestones_leave();
@@ -2839,8 +2879,13 @@ static int snapshot(const char *prefix, int seconds) {
         snprintf(path, sizeof path, "%s_place_cluster.ppm", prefix); write_ppm(path, fb);
         setup_cancel(&tank);
         tank.sd_unlocks |= SD_ITEM_CASTLE; tank_castle_place(&tank);
+#ifdef TANK_CYD
+        render_shop_leave(); render_shop(&tank, fb, TANK_W); render_shop_tap(&tank, PG_X(SHOP_ROW_X), PG_Y(SHOP_ROW_Y(2)));
+        render_shop(&tank, fb, TANK_W); render_shop_tap(&tank, PG_X(SHOP_SELL_X), PG_Y(SHOP_BTN_Y));   /* (this fork) SELL, armed, in the CYD's modal */
+#else
         render_shop_leave(); render_shop(&tank, fb, TANK_W); render_shop_tap(&tank, PAGE_X + 100, PAGE_Y + 98 + 2 * 56 + 20);
         render_shop(&tank, fb, TANK_W); render_shop_tap(&tank, PAGE_X + 48 + (352 - 216) / 2 + 116 + 50, PAGE_Y + 48 + 244 - 12 - 16);   /* SELL, armed */
+#endif
         render_shop(&tank, fb, TANK_W);
         snprintf(path, sizeof path, "%s_shop_sell.ppm", prefix); write_ppm(path, fb);
         render_shop_leave();
@@ -2849,7 +2894,11 @@ static int snapshot(const char *prefix, int seconds) {
         snprintf(path, sizeof path, "%s_place_sell.ppm", prefix); write_ppm(path, fb);
         setup_cancel(&tank); tank.sd_unlocks &= ~SD_ITEM_CASTLE;
         render_shop_leave(); render_shop(&tank, fb, TANK_W);
+#ifdef TANK_CYD
+        render_shop_tap(&tank, PG_X(SHOP_NEXT_X), PG_Y(SHOP_ARROW_Y));                 /* (this fork) the CYD's header arrow */
+#else
         render_shop_tap(&tank, PAGE_X + 400, PAGE_Y + 30);                              /* the header's right arrow: page 2 */
+#endif
         render_shop(&tank, fb, TANK_W);
         snprintf(path, sizeof path, "%s_shop2.ppm", prefix); write_ppm(path, fb);
         render_shop_leave();
