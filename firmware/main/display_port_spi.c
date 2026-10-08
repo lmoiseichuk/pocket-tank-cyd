@@ -92,10 +92,17 @@ bool display_port_init(void) {
         if (i2c_master_probe(s_i2c, address, 20) == ESP_OK) ESP_LOGI(TAG, "i2c: device at 0x%02X", address);
 
     backlight_init();                               /* dark until the first frame is in */
-#ifdef PIN_SD_CS
+#if CONFIG_POCKET_TANK_WST_320X240
     /* the TF card shares the LCD's SPI lines: hold its select high so the
-       card never answers a panel transfer */
-    gpio_set_direction(PIN_SD_CS, GPIO_MODE_OUTPUT);
+       card never answers a panel transfer. (this fork, 2026-10-08) Through
+       gpio_config, as every other output in the tree: gpio_set_direction
+       alone routes the GPIO matrix's output to the pin but leaves the
+       IO_MUX function as it was, and GPIO41's function 0 is the JTAG MTDI,
+       not the GPIO - gpio_config selects the GPIO function as well. */
+    const gpio_config_t sd_select = { .pin_bit_mask = 1ULL << PIN_SD_CS, .mode = GPIO_MODE_OUTPUT,
+                                      .pull_up_en = GPIO_PULLUP_DISABLE, .pull_down_en = GPIO_PULLDOWN_DISABLE,
+                                      .intr_type = GPIO_INTR_DISABLE };
+    ESP_ERROR_CHECK(gpio_config(&sd_select));
     gpio_set_level(PIN_SD_CS, 1);
 #endif
 
