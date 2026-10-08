@@ -236,6 +236,10 @@ int imu_port_rest_moved(void) {
 void imu_port_sleep(void) {
     if (s_chip) s_chip->sleep();
 }
+void imu_port_power_down(void) {
+    if (s_chip && s_chip->power_down) s_chip->power_down();
+    else imu_port_sleep();
+}
 void imu_port_wake(void) {
     if (!s_chip) return;
     if (!s_chip->reset_config()) ESP_LOGW(TAG, "wake reconfig failed");

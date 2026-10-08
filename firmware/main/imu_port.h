@@ -44,5 +44,6 @@ int  imu_port_rest_moved(void);
  * reconfigure on wake so it never resumes on trust. */
 void imu_port_sleep(void);
 void imu_port_wake(void);
+void imu_port_power_down(void);   /* deep sleep only: the 2 MHz clock off too (~50 -> ~20 uA); the wake is a reboot */
 
 #endif

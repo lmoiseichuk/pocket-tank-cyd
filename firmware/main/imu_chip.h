@@ -17,6 +17,7 @@ struct imu_chip {
     bool (*reset_config)(void);      /* soft reset + full config; never trust power-on state */
     bool (*read_accel)(int16_t a[3]);/* counts at +-2 g, the chip's own X Y Z */
     void (*sleep)(void);             /* quiesce before the neighbouring rails switch */
+    void (*power_down)(void);        /* deep sleep only: as far down as the chip goes (NULL: sleep is all it has); the wake is a reboot */
     int up_axis;                     /* 0=X 1=Y 2=Z: the axis along the screen's up, as mounted */
     int up_sign;                     /* +1 or -1: the sign that axis reads when held right side up */
     int out_axis;                    /* the axis out of the glass; the third is the other in-screen one */

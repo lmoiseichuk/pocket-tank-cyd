@@ -3,6 +3,7 @@
  * The AMOLED board's own IMU, and the part the CYD is waiting for. */
 #include "sdkconfig.h"
 #include "imu_chip.h"
+#include "display_port.h"      /* board_is_round, board_is_watch */
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -53,7 +54,15 @@ static bool rdn(uint8_t reg, uint8_t *val, size_t n) {
  * was found latched with two axes railed at full scale (garbage that only a
  * reset clears; only a full PMIC power-off ever power-cycles it). Never
  * trust its power-on state. */
+static bool qmi_reset_config_once(void);
 static bool qmi_reset_config(void) {
+    if (qmi_reset_config_once()) return true;
+    vTaskDelay(pdMS_TO_TICKS(50));             /* a chip woken from qmi_power_down can NACK the first round */
+    return qmi_reset_config_once();
+}
+static bool qmi_reset_config_once(void) {
+    (void)wr8(REG_CTRL1, 0x40);                /* its 2 MHz clock back on first (a night in Power-Down leaves it off) */
+    vTaskDelay(pdMS_TO_TICKS(5));
     bool rst = wr8(REG_RESET, 0xB0);
     vTaskDelay(pdMS_TO_TICKS(25));
     bool ok = wr8(REG_CTRL1, 0x40)   /* address auto-increment for burst reads */
@@ -77,12 +86,15 @@ static bool qmi_read_accel(int16_t a[3]) {
 
 /* sensors off, chip quiesced while the neighbouring rails cycle */
 static void qmi_sleep(void) { (void)wr8(REG_CTRL7, 0x00); }
+/* the datasheet's Power-Down: CTRL1 sensorDisable (bit 0) with every sensor off; the boot's soft reset undoes it */
+static void qmi_power_down(void) { (void)wr8(REG_CTRL1, 0x41); }
 
-static const struct imu_chip s_chip = {
+static struct imu_chip s_chip = {      /* not const: the round board and the watch mount it their own way (probe) */
     .name = "QMI8658",
     .reset_config = qmi_reset_config,
     .read_accel = qmi_read_accel,
     .sleep = qmi_sleep,
+    .power_down = qmi_power_down,
     .up_axis = UP_AXIS,
     .up_sign = UP_SIGN,
     .out_axis = OUT_AXIS,
@@ -111,7 +123,10 @@ const struct imu_chip *imu_qmi8658_probe(i2c_master_bus_handle_t bus) {
         forget(); return NULL;
     }
     if (!qmi_reset_config()) { ESP_LOGW(TAG, "QMI8658 config failed"); forget(); return NULL; }
+    /* the round 1.75C (2026-10-01, held upright, USB down): +X ~16.8k; the watch (2026-10-02) the same -
+       its panel's long axis is X, its foot +X (nothing reads it worn: the way up is settings SCREEN) */
+    if (board_is_round() || board_is_watch()) { s_chip.up_axis = 0; s_chip.up_sign = 1; }
     ESP_LOGI(TAG, "QMI8658 up at 0x%02x: orientation axis %c%c, out of the glass %c", addr,
-             UP_SIGN > 0 ? '+' : '-', "XYZ"[UP_AXIS], "XYZ"[OUT_AXIS]);
+             s_chip.up_sign > 0 ? '+' : '-', "XYZ"[s_chip.up_axis], "XYZ"[OUT_AXIS]);
     return &s_chip;
 }
