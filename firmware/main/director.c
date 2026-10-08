@@ -323,14 +323,18 @@ static void run(tank_t *t, char *line) {
         ESP_LOGI(TAG, "brightness %d/255", v);
     } else if (!strcmp(c, "deepsleep")) {
         int n = argc > 1 ? atoi(argv[1]) : 0;
+#if !CONFIG_POCKET_TANK_SLEEP_NONE && !CONFIG_POCKET_TANK_SLEEP_SCREEN && !CONFIG_POCKET_TANK_SLEEP_LIGHT   /* deepsleep (main.c's SLEEP_MODE_DEEP) */
         ESP_LOGI(TAG, "%s - the USB port vanishes until the wake", n > 0 ? "5 s grace, then deep sleep with the timer" : "the keeper's sleep: the grace, then power-off (the PWR key boots it)");
+#endif                                          /* the other sleep modes say what they do themselves (main.c) */
         vTaskDelay(pdMS_TO_TICKS(50));
         device_sleep(n);
     } else if (!strcmp(c, "keytime")) {
         int n = argc > 1 ? atoi(argv[1]) : 15; if (n < 1) n = 1; if (n > 60) n = 60;
         battery_port_key_trace(n);
     } else if (!strcmp(c, "poweroff")) {
+#if !CONFIG_POCKET_TANK_SLEEP_NONE && !CONFIG_POCKET_TANK_SLEEP_SCREEN && !CONFIG_POCKET_TANK_SLEEP_LIGHT
         ESP_LOGI(TAG, "power-off now (the PWR key or USB boots it) - the USB port vanishes");
+#endif
         vTaskDelay(pdMS_TO_TICKS(50));
         device_poweroff();
     } else if (!strcmp(c, "snd")) {

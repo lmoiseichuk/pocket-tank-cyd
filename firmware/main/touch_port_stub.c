@@ -29,3 +29,7 @@ void touch_port_show_battery(bool on) { s_bat = on; }
 void touch_port_dismiss(void) { s_ms = false; s_bat = false; }
 void touch_port_set_bias(int px) { (void)px; }
 int  touch_port_bias(void) { return 0; }
+/* no glass: the dark wakes on the IMU, BOOT or the timer */
+bool touch_port_finger_now(void) { return false; }
+void touch_port_swallow(void) { }
+int  touch_port_wake_gpio(void) { return -1; }

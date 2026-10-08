@@ -15,7 +15,7 @@ specification: [ES3C28P_ES2N28P_Specification_V1.0.pdf](https://www.lcdwiki.com/
 | Audio | ES8311 + NS4150B | ES8311 (I2C 0x18) + an amp enabled low on GPIO1 |
 | Power | AXP2101 PMIC, fuel gauge, PWR key | a charger for a LiPo on its socket; the cell's voltage on GPIO9; no PMIC |
 | IMU | QMI8658 (I2C 0x6B), on the board | none on the board: a QMI8658C or an MPU-6050 (0x68) on the I2C socket, SDA IO16 / SCL IO15, whichever answers at boot - an MPU-6050 now (see *The IMU*) |
-| Gestures | upside-down flip, handling (codec warm, the light's idle rule); the PWR key sleeps | the same, plus face down sleeps and face up wakes; BOOT is the sleep key (see *Gestures*) |
+| Gestures | upside-down flip, handling (codec warm, the light's idle rule); the PWR key sleeps | the same, plus face down sleeps and face up wakes; BOOT is the sleep key; asleep, a touch or a pick-up wakes it (see *Gestures*, *Sleep*) |
 | Clock | PCF85063 RTC | none |
 
 Pins: `firmware/main/board_pins.h`, from section 4.2 of the specification.
@@ -133,6 +133,53 @@ finger-landing correction made every miss land above its button, so it is
   breakout fitted, 0x68 (the MPU-6050). The AMOLED's other parts are absent
   and say so at boot: no AXP2101, no QMI8658, no PCF85063.
 
+## Sleep
+
+**The CYD never deep-sleeps** (2026-10-08). In its case BOOT cannot be
+reached, and deep sleep hears nothing else, so after the 20-minute grace
+the tank stayed dark for good. What sleep does is now a Kconfig choice,
+`POCKET_TANK_SLEEP_MODE`, and every way into sleep goes through it: BOOT's
+short press, the face-down gesture, the director's `deepsleep [N]` and
+`poweroff`, and the PWR key on a board with a PMIC.
+
+| mode | Kconfig | sleep is |
+|---|---|---|
+| none | `POCKET_TANK_SLEEP_NONE` | nothing: one log line says what asked and that it was ignored |
+| screen | `POCKET_TANK_SLEEP_SCREEN` | the dark, with the CPU running |
+| lightsleep | `POCKET_TANK_SLEEP_LIGHT` (the CYD's, `sdkconfig.defaults.cyd`) | the dark, light-sleeping between looks; never deep sleep |
+| deepsleep | `POCKET_TANK_SLEEP_DEEP` (the default, so the AMOLED's) | the grace, then deep sleep or the PMIC power-off, as it always was |
+
+**The dark** (`enter_dark`, `firmware/main/main.c`): the tank saves, the
+backlight and the sound go off, the tank stops drawing, and ten times a
+second it looks for a wake, for as long as it takes. It lights again where
+it was on:
+
+- **a touch** - a finger on the glass, once the glass has been seen without
+  one. The finger on the glass at the wake does nothing in the tank.
+- **a pick-up or a tilt** (below).
+- **face up**, and only that, in a dark begun face down: lying on its glass
+  the table could be the finger, and a knock read as motion would light it
+  face down, where the gesture, already spent, could not darken it again.
+- **BOOT**, the PWR key, or the director's timer (`deepsleep N`).
+
+The dark is lived through at the wake as a deep sleep is - growth at a
+quarter, the full-night badge - and counted once. One log line going dark
+(what asked, the mode, what will wake it) and one waking (what woke it,
+after how long). In lightsleep the chip light-sleeps between looks, woken
+early by BOOT or by the touch controller's INT on GPIO17, armed only while
+it reads high; while a USB host is attached it stays awake instead, because
+light sleep takes the USB port down - so on the bench lightsleep behaves as
+screen, and the log keeps flowing.
+
+**A pick-up or a tilt:** the IMU stays awake through the dark and is read
+five times a second. The board must first lie still - four reads in a row,
+each within 220 counts of the one before, about a second; a hand holding it
+reads hundreds, so a tank darkened in the hand settles only once it is put
+down - and that pose is the rest pose. Off it by more than 2500 counts
+(~0.15 g, about 9 degrees of tilt), summed over the axes, on two reads in a
+row, wakes it; a knock on the table is one read. **Provisional**: not yet
+tuned on the glass (`REST_*` in `firmware/main/imu_port.c`).
+
 ## The IMU
 
 The firmware's IMU work is all accelerometer, polled four times a second: the
@@ -208,15 +255,17 @@ under 1000 a poll, not the handling detector's 220: a hand steadying the
 board reads 200-800, which kept the gesture from firing on the bench. **Any
 sleep that starts face down wakes when it is turned face up** - the
 gesture's, or BOOT pressed while it lies there; a BOOT sleep face up keeps
-BOOT as its only wake. For those the IMU stays awake through the 20-minute
-grace - there are no rails to cycle on the CYD - and each 1 s wake of the
-grace reads it once: no longer face down (turned up, or picked up) resumes
-in place, as BOOT does. No answer from the IMU keeps it asleep. After
-the grace the IMU sleeps and the board deep-sleeps; only BOOT wakes it then
-(motion could only with the INT wire). The gesture fires once per lie-down,
-so waking it with BOOT while it still lies face down does not put it straight
-back to sleep. Face down means the axis out of the glass reads more than
-0.5 g toward the table with both in-screen axes under 0.35 g; the sign that
+BOOT as its only wake (in the deepsleep mode; the dark also wakes on a
+touch or a pick-up). For those the IMU stays awake - there are no rails to
+cycle on the CYD - and is read as the tank sleeps: no longer face down
+(turned up, or picked up) resumes in place, as BOOT does. No answer from the
+IMU keeps it asleep. In the deepsleep mode that lasts the 20-minute grace,
+read once a second; then the IMU sleeps and the board deep-sleeps, and only
+BOOT wakes it (motion could only with the INT wire). The gesture fires once
+per lie-down, so waking it with BOOT while it still lies face down does not
+put it straight back to sleep. Face down means the axis out of the glass
+reads more than 0.5 g toward the table with both in-screen axes under
+0.35 g; the sign that
 axis reads screen-up is `POCKET_TANK_IMU_MPU6050_OUT_NEGATIVE` (y for the
 mounting above: flat, screen up, Z reads -0.79 g; screen down, +1.23 g).
 
@@ -244,14 +293,17 @@ g); the README's *Gestures* table is the keeper's version of this.
 | picked up, carried | one poll's summed change over 220 (~0.013 g): `moving`, held 1 s | the codec stays warm | `main.c`, `audio_port_prewarm` |
 | held | `moving` on two polls in a row: `handled` | counts as attention for the light's idle rule (AUTO) | `tank_handled` |
 | screen down, level, still, 2 s (CYD) | out-of-glass axis over 0.5 g toward the table, in-screen axes under 0.35 g, motion under 1000, 8 polls; once per lie-down | sleeps as a BOOT press | `imu_port_take_face_down`, `main.c` |
-| screen up / picked up, asleep (CYD) | one read each 1 s slice of the grace: no longer face down | wakes in place - after a sleep that began face down | `imu_port_face_down_now`, `enter_sleep_for` |
-| BOOT, short press | the button (GPIO0), at release | sleep; within the 20-minute grace a press wakes in place; after it, deep sleep, and BOOT boots | `sleep_button_poll`, `enter_sleep_for` |
+| screen up / picked up, asleep (CYD) | one read every 0.2 s of the dark (each 1 s of the deepsleep mode's grace): no longer face down | wakes in place - after a sleep that began face down | `imu_port_face_down_now`, `enter_dark` |
+| picked up or tilted, dark (CYD) | still for ~1 s sets the rest pose; then off it by 2500 (~0.15 g) on two reads in a row, 0.2 s apart; not in a dark begun face down | wakes in place | `imu_port_rest_moved`, `enter_dark` |
+| a touch, dark (CYD) | a finger on the glass, after the glass was seen clear; not in a dark begun face down | wakes in place; that touch does nothing in the tank | `touch_port_finger_now`, `touch_port_swallow` |
+| BOOT, short press | the button (GPIO0), at release | sleep - on the CYD the dark, which a press ends; in the deepsleep mode a press within the 20-minute grace wakes in place, and after it BOOT boots | `sleep_button_poll`, `enter_sleep_for` |
 | BOOT held + a tap | a touch landing while BOOT is down | the *Reset tank?* prompt | `sleep_button_poll` |
 | double-tap the glass | two quick taps, then a pause (LIGHTS OUT = MANUAL, the default) | the tank light on / off, saved | `tank.c` (`light_manual_off`) |
 
 The face-down rows need `POCKET_TANK_IMU_FACE_DOWN_SLEEP` (on for the CYD)
-and FACE DOWN = SLEEP in settings. Deep sleep after the grace hears only
-BOOT: waking it on movement needs the IMU's INT line wired (below).
+and FACE DOWN = SLEEP in settings. In the deepsleep mode, deep sleep after
+the grace hears only BOOT: waking it on movement there needs the IMU's INT
+line wired (below).
 
 ## Still open
 
@@ -268,8 +320,23 @@ BOOT: waking it on movement needs the IMU's INT line wired (below).
 - **Waking from deep sleep on movement** needs the IMU's INT line on an RTC
   GPIO - GPIO21 or GPIO14 on the 4-pin expansion socket (not GPIO3, a
   strapping pin; never GPIO0) - an ext1 wake beside BOOT's ext0, and the
-  chip's motion interrupt armed at sleep. Not done: within the 20-minute
-  grace, face up already wakes it.
+  chip's motion interrupt armed at sleep. Not done: the CYD no longer
+  deep-sleeps, and its dark wakes on movement by reading the IMU.
+- **The dark is unmeasured on the bench** (2026-10-08). The pick-up and tilt
+  numbers are provisional; GPIO17 has never been seen to move under a
+  finger (without it a tap shorter than the 0.1 s between looks can be
+  missed - a held one cannot); and nobody has measured what the dark draws.
+  Where it could be cut: the panel is in DISPOFF, not SLPIN (120 ms more to
+  wake); the MPU-6050 is awake (~0.5 mA) where its cycle mode would do; the
+  touch controller is read ten times a second, which may keep it out of its
+  own monitor mode; and in light sleep ESP-IDF isolates every pin not armed
+  as a wake (`ESP_SLEEP_GPIO_RESET_WORKAROUND`), so the amplifier's enable
+  (GPIO1, on when low) and the backlight (GPIO45) are left to the board's
+  own resistors.
+- **Nothing takes the tank back into the dark.** There is no idle timeout:
+  a wake that nobody meant - a bump that read as a pick-up - leaves it lit
+  until it is laid face down. If that happens in the case, a timeout back
+  into the dark after a spell with no touch and no motion is the next step.
 - **Two face-down sleeps stayed dark, BOOT included,** in the first hour of
   bring-up (2026-09-30) and never since, across every later round - BOOT and
   face up, in either order. Not explained. If one recurs, note the steps; the

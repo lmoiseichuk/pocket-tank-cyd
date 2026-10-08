@@ -102,9 +102,39 @@ menu "pocket-tank"
         depends on POCKET_TANK_IMU_QMI8658 || POCKET_TANK_IMU_MPU6050
         help
             Screen down and still for 2 s is a short press of the sleep key;
-            turned face up within the 20-minute grace, the tank wakes in place.
+            turned face up, the tank wakes in place (in the deepsleep mode,
+            only within its 20-minute grace).
             The compact settings page's SCREEN row becomes FACE DOWN SLEEP /
             IGNORE once an IMU answers (the IMU turns the picture itself).
+    choice POCKET_TANK_SLEEP_MODE
+        prompt "Sleep mode: what the sleep key, face down and the director's sleeps do"
+        default POCKET_TANK_SLEEP_DEEP
+        help
+            Every way into sleep goes through this: BOOT's short press (no
+            PMIC), the PWR key (short and long), the face-down gesture, and
+            the director's deepsleep and poweroff. The modes that go dark
+            (screen, lightsleep) save the tank, turn the backlight and the
+            sound off and stop drawing; a touch or a pick-up or tilt (face
+            up instead, after a face-down sleep), BOOT, the PWR key, or the
+            director's timer lights it again where it was. The touch that
+            wakes it does nothing in the tank. Made for the CYD, whose case
+            covers BOOT.
+        config POCKET_TANK_SLEEP_NONE
+            bool "none: never goes dark; every way into sleep is ignored, with a log line"
+        config POCKET_TANK_SLEEP_SCREEN
+            bool "screen: dark, the CPU running"
+        config POCKET_TANK_SLEEP_LIGHT
+            bool "lightsleep: dark, light-sleeping between looks; never deep sleep"
+            help
+                While a USB host is attached the chip stays awake instead,
+                as in screen: light sleep takes the USB port down.
+        config POCKET_TANK_SLEEP_DEEP
+            bool "deepsleep: the 20-minute grace, then deep sleep or the PMIC power-off"
+            help
+                As the tank has always slept: within the grace BOOT, the
+                PWR key or face up wakes it in place; after it only BOOT,
+                the PWR key or the director's timer does, with a boot.
+    endchoice
     config POCKET_TANK_NO_PIE
         bool "Disable the PIE SIMD inference kernel (scalar dot products)"
         default n

@@ -26,6 +26,7 @@
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "driver/i2c_master.h"
+#include "driver/gpio.h"
 #include <math.h>
 
 static const char *TAG = "touch";
@@ -45,6 +46,7 @@ static bool s_held_page;                          /* this press opened a piece's
 static int  s_set_what, s_set_val;                /* a segment tapped: SET_TAP_* + value, for main */
 static bool s_pill;                               /* main.c drew the battery pill this frame: a tap on it is its page's */
 static bool s_bat; static int64_t s_bat_us;       /* the battery page up, and since when (it closes itself) */
+static bool s_swallow;                            /* the tank just lit from the dark: no gesture until the glass is clear */
 #define BATTERY_PAGE_US (30LL * 1000000)
 #define CONFIRM_TIMEOUT_US (20LL * 1000000)
 static bool s_inverted;                           /* screen 180-flipped: mirror into tank space */
@@ -116,6 +118,11 @@ void touch_port_poll(tank_t *t) {
     uint16_t x[1], y[1], st[1]; uint8_t n = 0;
     esp_lcd_touch_read_data(s_tp);
     bool touched = esp_lcd_touch_get_coordinates(s_tp, x, y, st, &n, 1) && n > 0;
+    if (s_swallow) {                            /* the finger from the dark (touch_port_swallow): no press, */
+        if (!touched) s_swallow = false;        /* no tap, no hold - the next touch is a fresh one */
+        s_down = false; s_held_page = false;
+        return;
+    }
 #if CONFIG_POCKET_TANK_BOARD_CYD28
     /* landscape from the driver, turned 180 degrees (see touch_port_init); a
        flipped screen undoes the turn */
@@ -284,3 +291,34 @@ int  touch_port_take_shop(void) { int r = s_shop_act; s_shop_act = 0; return r; 
 void touch_port_set_pill(bool up) { s_pill = up; }
 bool touch_port_battery(void) { return s_bat; }
 void touch_port_show_battery(bool on) { s_bat = on; if (on) { s_bat_us = esp_timer_get_time(); s_sel = -1; } }
+
+/* ---- the dark (touch_port.h; main.c's enter_dark) ---- */
+bool touch_port_finger_now(void) {
+    if (!s_tp || esp_lcd_touch_read_data(s_tp) != ESP_OK) return false;   /* no answer: no finger */
+    esp_lcd_touch_point_data_t point[1];
+    uint8_t n = 0;
+    return esp_lcd_touch_get_data(s_tp, point, &n, 1) == ESP_OK && n > 0;
+}
+void touch_port_swallow(void) { s_swallow = true; }
+#if CONFIG_POCKET_TANK_BOARD_CYD28
+/* The FT6336's INT on GPIO17 (board_pins.h), which the game never uses: it
+ * polls. Not yet seen on the bench, and the driver never sets the chip's
+ * G_MODE, so whether it holds low through a touch or pulses is the chip's
+ * default - a held line is a sure level wake, a pulse a likely one. A
+ * floating or dead line costs nothing: the pull-up keeps it high, main.c
+ * never arms a line that already reads low, and the dark's own reads still
+ * find the finger. */
+int touch_port_wake_gpio(void) {
+    static bool configured;
+    if (!s_tp) return -1;
+    if (!configured) {
+        gpio_config_t io = { .pin_bit_mask = 1ULL << PIN_TP_INT, .mode = GPIO_MODE_INPUT,
+                             .pull_up_en = GPIO_PULLUP_ENABLE, .pull_down_en = GPIO_PULLDOWN_DISABLE };
+        configured = gpio_config(&io) == ESP_OK;
+        if (!configured) return -1;
+    }
+    return PIN_TP_INT;
+}
+#else
+int touch_port_wake_gpio(void) { return -1; }    /* the AMOLED's INT is not in use, and display_port_sleep holds its touch in reset */
+#endif

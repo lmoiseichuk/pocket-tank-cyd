@@ -46,4 +46,15 @@ bool touch_port_battery(void);
 void touch_port_show_battery(bool on);
 void touch_port_set_bias(int px);              /* finger-landing correction: reported y moves up by px */
 int  touch_port_bias(void);
+/* the dark (2026-10-08, main.c's enter_dark, the tank task waiting):
+ * touch_port_finger_now is one raw read - a finger on the glass? - with no
+ * gesture, no sound prewarm and no log. touch_port_swallow, at the wake: the
+ * finger on the glass then (the one that woke it, or one holding the board
+ * that motion woke) is no gesture; nothing counts until the glass is clear.
+ * touch_port_wake_gpio: the controller's INT line, set up as an input with a
+ * pull-up, for a light-sleep wake - or -1 where there is none to use. A wake
+ * on it is only a reason to look; the read decides. */
+bool touch_port_finger_now(void);
+void touch_port_swallow(void);
+int  touch_port_wake_gpio(void);
 #endif

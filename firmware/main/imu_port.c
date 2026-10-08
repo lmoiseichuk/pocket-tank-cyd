@@ -173,6 +173,63 @@ bool imu_port_take_face_down(void) { return false; }   /* the gesture is not bui
 int  imu_port_face_down_now(void) { return -1; }
 #endif
 
+/* the dark's wake on movement (see imu_port.h). PROVISIONAL, 2026-10-08: no
+ * bench yet - the numbers are for tuning.
+ *  - settling: a read within MOTION_THRESH (the handling detector's 220) of
+ *    the read before is still. A table reads tens and a hand holding the
+ *    board hundreds, so only a board that has been put down settles.
+ *  - moved: the read's summed distance from the rest pose, over the healthy
+ *    axes, past REST_MOVE_THRESH on REST_MOVE_READS reads in a row. 2500
+ *    counts is ~0.15 g, about 9 degrees of tilt from the rest pose; lifting
+ *    it to look at it is more than that, and a knock on the table is one
+ *    read, not two. */
+#define REST_SETTLE_READS 4       /* still reads in a row before the pose is the rest pose: ~1 s */
+#define REST_MOVE_THRESH  2500    /* ~0.15 g off the rest pose */
+#define REST_MOVE_READS   2       /* reads in a row off it */
+static int16_t s_rest[3];         /* the rest pose, once settled */
+static int16_t s_rest_last[3];    /* the read before, while settling */
+static bool s_rest_have_last;
+static int s_rest_still;          /* still reads in a row; REST_SETTLE_READS = settled */
+static int s_rest_off;            /* reads in a row off the rest pose */
+
+/* summed |a - b| over the axes where neither is railed (RAILED is the macro
+ * defined inside imu_port_poll above: a #define holds to the end of the file) */
+static int distance(const int16_t a[3], const int16_t b[3]) {
+    int sum = 0;
+    for (int i = 0; i < 3; i++) {
+        if (RAILED(a[i]) || RAILED(b[i])) continue;
+        int d = a[i] - b[i];
+        sum += d < 0 ? -d : d;
+    }
+    return sum;
+}
+
+void imu_port_rest_begin(void) {
+    s_rest_have_last = false;
+    s_rest_still = 0;
+    s_rest_off = 0;
+}
+
+int imu_port_rest_moved(void) {
+    int16_t a[3];
+    if (!s_chip || !s_chip->read_accel(a)) return 0;       /* no answer: the dark stays */
+    if (s_rest_still < REST_SETTLE_READS) {
+        /* settling: wait for the board to lie still */
+        if (s_rest_have_last && distance(a, s_rest_last) <= MOTION_THRESH) s_rest_still++;
+        else s_rest_still = 0;
+        for (int i = 0; i < 3; i++) s_rest_last[i] = a[i];
+        s_rest_have_last = true;
+        if (s_rest_still == REST_SETTLE_READS)
+            for (int i = 0; i < 3; i++) s_rest[i] = a[i];
+        return 0;
+    }
+    int off = distance(a, s_rest);
+    if (off > REST_MOVE_THRESH) s_rest_off++;
+    else s_rest_off = 0;
+    if (s_rest_off < REST_MOVE_READS) return 0;
+    return off;
+}
+
 /* drowse bracket (see imu_port.h). Sleep: sensors off, chip quiesced while
  * the neighbouring rails cycle. Wake: never trust what the chip did in the
  * dark - full soft reset + reconfigure. */
