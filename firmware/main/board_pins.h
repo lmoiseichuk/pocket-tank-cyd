@@ -28,7 +28,7 @@
 #define BOARD_PINS_H
 #include "sdkconfig.h"
 
-#if CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#if CONFIG_POCKET_TANK_CYD_320X240
 /* The 2.8" ESP32-S3 CYD, ES3C28P (lcdwiki.com, ES3C28P_ES2N28P_Specification_V1.0
  * section 4.2). A stock board, no modifications: everything below is as the
  * vendor wires it. The LCD's reset is CHIP_PU - it resets with the chip, so
@@ -65,7 +65,7 @@
 #define PIN_I2S_DOUT      8        /* ESP -> codec DSDIN; GPIO6 is the microphone's way back, unused */
 #define PIN_AMP_EN        1
 #define AMP_EN_ON         0        /* the spec: "low level enable" */
-#elif CONFIG_POCKET_TANK_BOARD_TLCD2
+#elif CONFIG_POCKET_TANK_WST_320X240
 /* The Waveshare ESP32-S3-Touch-LCD-2 (waveshare.com/wiki/ESP32-S3-Touch-LCD-2:
  * the ESP-IDF demos' main.c, the Arduino factory app, and the schematic's
  * netlist). A stock board, no modifications. The LCD's and the touch panel's

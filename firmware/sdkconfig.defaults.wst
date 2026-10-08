@@ -5,9 +5,9 @@
 # audio port is the stub, the battery meter stays hidden (no AXP2101 answers)
 # and the clock is the system time kept through deep sleep.
 #
-#   idf.py -B build_tlcd2 -D SDKCONFIG=build_tlcd2/sdkconfig \
-#          -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.tlcd2" build
-CONFIG_POCKET_TANK_BOARD_TLCD2=y
+#   idf.py -B build_wst -D SDKCONFIG=build_wst/sdkconfig \
+#          -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.wst" build
+CONFIG_POCKET_TANK_WST_320X240=y
 CONFIG_POCKET_TANK_DISPLAY_SH8601=n
 CONFIG_POCKET_TANK_DISPLAY_ST7789=y
 CONFIG_POCKET_TANK_TOUCH_FT3168=y

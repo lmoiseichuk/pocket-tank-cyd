@@ -453,7 +453,7 @@ void tank_init(tank_t *t, uint32_t seed) {
                                        * glass to the cap, so every morning looked the
                                        * same; now a night lands near ALGAE_DIRTY) */
 #define ALGAE_COVER_CAP     0.30f     /* growth stops claiming new cells here */
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
 /* (this fork) the steps above were tuned on the 1.8's 28 x 23 = 644 cells; the
  * CYD's glass is 20 x 15 = 300. A step claims or thickens one cell, so at the
  * same pace per step its film covered the glass at twice the share an hour, and

@@ -2279,7 +2279,7 @@ static void card_draw(ctx_t c, const tank_t *t, int fish_idx) {
 
     /* divider between the zones: across the one-column card, down the
        middle of the CYD's two-column one */
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
     for (int y = Y + 30; y < Y + H - 8; y++) px_blend(&c, X + 124, y, 0x2a3f45, 200);
     const int TX = X + 130, TW = W - 138, TY = Y + 34;    /* the traits' column */
 #else
@@ -2939,7 +2939,7 @@ static void fish_glyph(ctx_t *c, float cx, float cy, float r, uint32_t rgb) {
    badge needs its pair here: one missing draws 32 px art in a 24 px slot,
    over its neighbours, with no error. */
 static const icon_t *badge_art(const icon_t *ic) {
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
     static const struct { const icon_t *full, *small; } SMALL[] = {
         { &icon_ms_first_bubbles, &icon_ms_first_bubbles_24 },     { &icon_ms_first_dart, &icon_ms_first_dart_24 },
         { &icon_ms_first_feeding, &icon_ms_first_feeding_24 },     { &icon_ms_first_follow, &icon_ms_first_follow_24 },
@@ -3431,7 +3431,7 @@ void render_notice(const tank_t *t, uint16_t *fb, int stride, int kind, int fish
 static int  g_shp_modal = -1;        /* the item whose modal is up, or -1 */
 static bool g_shp_earn;              /* the HOW TO EARN modal is up */
 static bool g_shp_sell_armed;        /* SELL tapped once: the next tap on it sells */
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
 #define SHP_COIN_ART  (&icon_ms_sand_dollar)        /* the CYD's header is a row shorter: the 32 px coin */
 #else
 #define SHP_COIN_ART  (&icon_shop_sand_dollar_64)
@@ -3609,7 +3609,7 @@ static const char *const SET_SCREEN[2] = { "NORMAL", "TURNED" };   /* the defaul
 #endif
 /* this fork, the CYD: the row where the others have ROTATION is chosen at
    run time (render.h, SET_TAP_FLIP), and the SLEEP row under it (SET_TAP_SLEEP) */
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
 static const char *const SET_FLIP[2] = { "UPRIGHT", "FLIPPED" };
 static const char *const SET_SLEEP[3] = { "NEVER", "SCREEN", "LIGHT" };   /* SET_SLEEP_*'s order */
 #endif
@@ -3643,7 +3643,7 @@ static void set_arrow(ctx_t *c, int x, int y, bool right, bool live) {
 /* ROTATION's picture: a padlock inside a turning arrow - shut when the way
  * up is locked, its shackle swung open while the picture follows the tank
  * (the two differ in shape, not in color alone) */
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
 /* (this fork) the CYD's segment is 24 px tall: the same picture a size down -
    a 21 px ring, its arrowhead, an 8 px padlock */
 static void set_lock_icon(ctx_t *c, int cx, int cy, bool locked, uint32_t rgb) {
@@ -3705,7 +3705,7 @@ void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, 
     set_row(&c, SET_ROW5_Y, "SCREEN", SET_SCREEN, 2, t->screen_turned ? 1 : 0);
     draw_text(&c, SET_LABEL_X, SET_NOTE5_Y, 2, MSP_DIM, "WORN THE OTHER WAY AROUND?");
 #else
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
     /* (this fork) the CYD with no IMU to turn the picture: the keeper's SCREEN */
     if (!g_set_imu) set_row(&c, SET_ROW5_Y, "SCREEN", SET_FLIP, 2, g_set_flipped ? 1 : 0);
     else
@@ -3719,7 +3719,7 @@ void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, 
         set_lock_icon(&c, x + SET_SEG_W / 2, y + SET_SEG_H / 2 + 1, t->orient_lock, t->orient_lock ? MSP_INK : MSP_TEAL);
         draw_text(&c, SET_ROT_WORD_X, SET_ROW5_Y, UI_TEXT(2), t->orient_lock ? 0xffffff : MSP_DIM, t->orient_lock ? "LOCKED" : "UNLOCKED");
     }
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
     /* (this fork) the SLEEP row under it, IMU or not: what the ways into
        sleep do. A deepsleep build has no choice to offer and no row. */
     if (g_set_sleep >= 0) set_row(&c, SET_ROW6_Y, "SLEEP", SET_SLEEP, 3, g_set_sleep);
@@ -3736,7 +3736,7 @@ void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, 
     char ver[64]; snprintf(ver, sizeof ver, "V%s %s  BUILD %s", PT_RELEASE, PT_RELEASE_STAGE, version_port_string());
 #if TANK_WORN                                    /* the watch: centred under the foot, between the lower corners */
     draw_text_8px(&c, (PAGE_W - ((int)strlen(ver) * 6 - 1)) / 2, SET_FOOT_Y + MSP_CLOSE_H + 2, MSP_DIM, ver);
-#elif defined(CONFIG_POCKET_TANK_BOARD_CYD_320X240)
+#elif defined(CONFIG_POCKET_TANK_320X240)
     /* (this fork) the CYD: no UPDATES (no update channel), so the version line
        has the foot left of CLOSE - clipped short of it (6 px a character in
        the 8 px font): the build id's tail is what gives way, the release
@@ -3748,7 +3748,7 @@ void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, 
     draw_text_8px(&c, SET_LABEL_X + (PAGE_BOWL ? 96 : 0), PAGE_H - 8 - 6, MSP_DIM, ver);
 #endif
     button(&c, SET_CLOSE_X, SET_FOOT_Y, MSP_CLOSE_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "CLOSE", UI_TEXT(2));
-#ifndef CONFIG_POCKET_TANK_BOARD_CYD_320X240 /* (this fork) the CYD has no update channel: no UPDATES (CYD.md) */
+#ifndef CONFIG_POCKET_TANK_320X240 /* (this fork) the CYD has no update channel: no UPDATES (CYD.md) */
     /* UPDATES (2026-09-30, docs/OTA.md): bottom left, the same size as CLOSE */
     button(&c, SET_UPD_X, SET_FOOT_Y, SET_UPD_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "UPDATES", 2);
 #endif
@@ -3766,7 +3766,7 @@ enum { SET_HIT_LIGHT_PREV = 100, SET_HIT_LIGHT_NEXT };
 int render_settings_tap(float x, float y, int *value) {
     x -= PAGE_X; y -= PAGE_Y;                    /* the page's own coordinates */
     if (x >= SET_CLOSE_X - UI(8) && y >= SET_FOOT_Y - UI(4)) return SET_TAP_CLOSE;
-#ifndef CONFIG_POCKET_TANK_BOARD_CYD_320X240 /* (this fork) the CYD has no UPDATES button */
+#ifndef CONFIG_POCKET_TANK_320X240 /* (this fork) the CYD has no UPDATES button */
     if (x < SET_UPD_X + SET_UPD_W + 8 && y >= SET_FOOT_Y - 4) return SET_TAP_UPDATES;
 #endif
     /* the row bands: from a little above each segment down to the next row
@@ -3776,7 +3776,7 @@ int render_settings_tap(float x, float y, int *value) {
     if (y >= SET_SEG_Y(SET_ROW2_Y) - UI(12) && y < SET_SEG_Y(SET_ROW3_Y) - UI(12)) { if (seg < 0) return SET_TAP_NONE; *value = seg; return SET_TAP_VOLUME; }
     if (y >= SET_SEG_Y(SET_ROW3_Y) - UI(12) && y < SET_SEG_Y(SET_ROW4_Y) - UI(12)) { if (seg < 0) return SET_TAP_NONE; *value = 0; return x < SET_SPAN_MID ? SET_HIT_LIGHT_PREV : SET_HIT_LIGHT_NEXT; }
     if (y >= SET_SEG_Y(SET_ROW4_Y) - UI(12) && y < SET_SEG_Y(SET_ROW5_Y) - UI(12)) { if (two < 0) return SET_TAP_NONE; *value = two == 0; return SET_TAP_FEED; }
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
     /* (this fork) the CYD: SCREEN (no IMU) or ROTATION, then SLEEP (not deepsleep) */
     if (y >= SET_SEG_Y(SET_ROW5_Y) - UI(12) && y < SET_SEG_Y(SET_ROW6_Y) - UI(12)) {
         if (two < 0) return SET_TAP_NONE;

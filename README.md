@@ -4,13 +4,13 @@
 > (CYD) as well as on upstream's three Waveshare boards. What it changes
 > against upstream:
 >
-> - a fourth board, `CONFIG_POCKET_TANK_BOARD_CYD_320X240`: a 320 x 240 tank, built and flashed with `tools/build_cyd.sh`
+> - a fourth board, `CONFIG_POCKET_TANK_CYD_320X240`: a 320 x 240 tank, built and flashed with `tools/build_cyd.sh`
 > - every page laid out for a 240 px glass: a two-column stats card, 24 px badges, a full-width shop and settings page
 > - two settings rows of the CYD's own: SCREEN (ROTATION once an IMU answers) and SLEEP (NEVER / SCREEN / LIGHT)
 > - two sleep modes that never deep-sleep, screen and lightsleep: the glass goes dark and wakes on a touch, a pick-up or BOOT
 > - an MPU-6050 beside the QMI8658, probed at boot; on the CYD an IMU breakout on its I2C socket, and face down sleeps the tank
 > - on the CYD, no updates over Wi-Fi, no battery page, no PWR key and no clock chip
-> - the simulator's fourth world, `make -C sim BOARD_CYD_320X240=1`, and `make -C sim check-all` across all four
+> - the simulator's fourth world, `make -C sim 320X240=1`, and `make -C sim check-all` across all four
 >
 > Using it, building and flashing it, and syncing the fork with upstream:
 > **[CYD.md](CYD.md)**.

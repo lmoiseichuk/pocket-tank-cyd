@@ -20,7 +20,7 @@ flash it first (*Building and flashing*), then *Using it*.
 
 Against upstream's main (`git log upstream/main..main`):
 
-- **A fourth board.** `CONFIG_POCKET_TANK_BOARD_CYD_320X240` builds a
+- **A fourth board.** `CONFIG_POCKET_TANK_CYD_320X240` builds a
   320 x 240 tank for the ES3C28P: an ILI9341 display port over SPI, the
   FT6336 touch, the ES8311 on the CYD's own pins. It is built and flashed by
   cable with `tools/build_cyd.sh` (*Building and flashing*).
@@ -44,8 +44,8 @@ Against upstream's main (`git log upstream/main..main`):
 - **Two rules scaled to the smaller tank, on the CYD only.** The model's
   distance bands scale with the tank's width, and the algae films the glass
   at the 1.8's pace per cell (*What the port changes*).
-- **The simulator's fourth world.** `make -C sim BOARD_CYD_320X240=1` builds
-  `fishsim-cyd_320x240`, and `make -C sim check-all` runs the selftests in
+- **The simulator's fourth world.** `make -C sim 320X240=1` builds
+  `fishsim-320x240`, and `make -C sim check-all` runs the selftests in
   all four worlds.
 
 What reaches upstream's boards: the IMU code split into one driver per chip
@@ -382,8 +382,8 @@ The simulator runs the CYD's world on the desktop, the same `common/` code
 at 320 x 240, for previews and the selftests:
 
 ```sh
-make -C sim BOARD_CYD_320X240=1             # builds sim/fishsim-cyd_320x240
-make -C sim BOARD_CYD_320X240=1 check       # its selftests
+make -C sim 320X240=1                       # builds sim/fishsim-320x240
+make -C sim 320X240=1 check                 # its selftests
 ```
 
 README.md's [*Try it: PC simulator*](README.md#try-it-pc-simulator) has the
@@ -408,9 +408,11 @@ The LCD resets with the chip (CHIP_PU), so there is no reset pin to drive.
 ## What the port changes
 
 **The tank's size is the board's.** `common/tank.h` takes `TANK_W` x `TANK_H`
-from Kconfig (`CONFIG_POCKET_TANK_BOARD_CYD_320X240` = 320 x 240, named by its
-resolution because CYDs come in several); `make BOARD_CYD_320X240=1` in `sim/`
-builds the simulator at that size (`fishsim-cyd_320x240`) for previews. The
+from Kconfig: `CONFIG_POCKET_TANK_320X240` = 320 x 240, the part every
+320 x 240 board shares, which the board's own choice selects
+(`CONFIG_POCKET_TANK_CYD_320X240` here; named by the resolution because CYDs
+come in several, and other boards have it too). `make 320X240=1` in `sim/`
+builds the simulator at that size (`fishsim-320x240`) for previews. The
 tank scene lays itself out from those two already.
 
 **The pages scale, the pixel art does not.** `common/ui.h`: `UI(n)` is a length
@@ -767,8 +769,8 @@ upstream's text but for one block.
    git merge upstream/main
    ```
 
-2. **Resolve.** The CYD lives in `#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240`
-   blocks, so a conflict is usually upstream's change and the fork's block
+2. **Resolve.** The CYD lives in `#ifdef CONFIG_POCKET_TANK_320X240`
+   blocks (and the CYD's own hardware in `CONFIG_POCKET_TANK_CYD_320X240`), so a conflict is usually upstream's change and the fork's block
    side by side, and both stay. Where conflicts land:
    - `common/render.h` - the CYD's page layouts are one block at the end of
      the file that redefines upstream's names, so upstream's own lines stay

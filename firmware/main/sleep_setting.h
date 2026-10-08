@@ -20,7 +20,7 @@
 #include "sdkconfig.h"
 /* the CYD built for none, screen or lightsleep: the SLEEP row exists, and
    main.c compiles the dark (enter_dark) for it whatever the build's mode */
-#if defined(CONFIG_POCKET_TANK_BOARD_CYD_320X240) && (CONFIG_POCKET_TANK_SLEEP_NONE || CONFIG_POCKET_TANK_SLEEP_SCREEN || CONFIG_POCKET_TANK_SLEEP_LIGHT)
+#if defined(CONFIG_POCKET_TANK_CYD_320X240) && (CONFIG_POCKET_TANK_SLEEP_NONE || CONFIG_POCKET_TANK_SLEEP_SCREEN || CONFIG_POCKET_TANK_SLEEP_LIGHT)
 #define SLEEP_SETTING_ROW 1
 #endif
 void sleep_setting_init(void);           /* after nvs_flash_init */

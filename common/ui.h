@@ -7,7 +7,7 @@
  * out on the same 448 x 368 PAGE (render.h), whatever the size of its glass,
  * so there both are exactly n and s, by definition - not by arithmetic that
  * happens to come out even: those builds compile what upstream wrote. Only on
- * a CYD at 320 x 240 (CONFIG_POCKET_TANK_BOARD_CYD_320X240) is the page
+ * a 320 x 240 board (CONFIG_POCKET_TANK_320X240: the CYD, the Touch-LCD-2) is the page
  * smaller - 292 x 240, the design at 240/368 - and there they are about 0.65
  * of the design, rounded:
  * the glass has 143 px per inch against the AMOLED's 322, so a page at 0.65
@@ -18,14 +18,14 @@
  * Pixel art (the icons, the castle and coral glyphs) is NOT scaled: it is
  * drawn a pixel at a time and would fall apart - it keeps its size and the
  * layout around it shrinks. Where that cannot work (the milestones page, the
- * shop, settings, the stats card) the CYD has layouts of its own: render.h's
- * CONFIG_POCKET_TANK_BOARD_CYD_320X240 blocks. */
+ * shop, settings, the stats card) the 320 x 240 boards have layouts of their
+ * own: render.h's CONFIG_POCKET_TANK_320X240 blocks. */
 #ifndef POCKET_TANK_UI_H
 #define POCKET_TANK_UI_H
 #include "tank.h"
 
 #define UI_DESIGN_H 368             /* the page height every layout was designed at */
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
 #define UI_PAGE_H  240              /* the CYD's page height: render.h's PAGE_H there */
 #define UI(n)      (((n) * UI_PAGE_H + UI_DESIGN_H / 2) / UI_DESIGN_H)
 #define UI_F       ((float)UI_PAGE_H / UI_DESIGN_H)                /* the same, for float sizes */

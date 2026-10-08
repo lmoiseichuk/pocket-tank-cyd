@@ -17,7 +17,7 @@
  * helpers below (render_text, render_rect, ...) take PAGE coordinates; the
  * tap tests take the frame's, as the touch ports report them. In the
  * rectangle the two are the same thing. */
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
 /* this fork, the CYD's 320 x 240: its pages are the design SCALED (ui.h's UI(), 240 / 368),
  * so the page is UI(448) x UI(368), centred - glass x 14..306. The layouts that use the
  * whole glass instead (the milestones page, the shop, settings: the CYD block at the end
@@ -110,7 +110,7 @@ void render_stats_card(const tank_t *t, int fish_idx, uint16_t *fb, int stride);
 #elif defined(TANK_WATCH)       /* the watch: in from its round corner */
 #define RENDER_CARD_X 36
 #define RENDER_CARD_Y 36
-#elif defined(CONFIG_POCKET_TANK_BOARD_CYD_320X240)
+#elif defined(CONFIG_POCKET_TANK_320X240)
 /* this fork, the CYD's 240 px: the card's pixel-art icons (24 px needs, 16 px trait
  * poles) cannot shrink, so it goes to two columns instead of one - the needs down the
  * left, the traits and MORE down the right - and the toolbox fits under it (164..234) */
@@ -120,7 +120,7 @@ void render_stats_card(const tank_t *t, int fish_idx, uint16_t *fb, int stride);
 #define RENDER_CARD_X 14
 #define RENDER_CARD_Y 8
 #endif
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
 #define RENDER_CARD_W 224
 #define RENDER_CARD_H 144
 #else
@@ -560,7 +560,7 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
 #define MSP_HIT_X0    20             /* a row's taps start here: the milestones' portraits and names, the shop's rows */
 #define MSP_TANK_BADGE 4             /* the tank row's badges and page arrow: their top, under MSP_TANK_Y */
 
-/* ---- this fork: a CYD at 320 x 240 (CONFIG_POCKET_TANK_BOARD_CYD_320X240). The modals, the
+/* ---- this fork: a 320 x 240 board, the CYD or the Touch-LCD-2 (CONFIG_POCKET_TANK_320X240). The modals, the
  * notices, the prompts and the setup flow are the design scaled (ui.h), on a
  * 292 x 240 page centred on the glass. These three pages cannot be: seven
  * rows of 32 px badges do not fit 240 px at any pitch, and the shop's and
@@ -569,7 +569,7 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
  * whole of it - no curved bezel to keep clear of - so their columns are glass
  * x, put on the page by CYD_GLASS_X. The upstream names are redefined here
  * rather than branched above, so upstream's own lines stay as written. ---- */
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
 #define CYD_GLASS_X(x) ((x) - PAGE_X)   /* a column measured on the glass, as a page x */
 /* the milestones page: 24 px badges (the generated copies, tools/gen_icons.py)
    on 28 px rows, the three buttons spread across the whole foot */

@@ -111,7 +111,7 @@ static void print_roster(const tank_t *t) {
 #define MS_OFF_Y       (MS_ROW(N_FISH_MAX - 1) + MSP_ROW_H - 12)
 #define MS_HOW_X       (MSP_MODAL_X + (MSP_MODAL_W - MSP_HOW_W) / 2)
 #define MS_HOW_Y       (MSP_FRY_MODAL_Y + MSP_MODAL_H + 20 + 24 + MSP_HOW_H + 14 - 10 - MSP_HOW_H)
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240 /* (this fork) the CYD's modals are the design scaled (ui.h), these line heights with them (render.c) */
+#ifdef CONFIG_POCKET_TANK_320X240 /* (this fork) the CYD's modals are the design scaled (ui.h), these line heights with them (render.c) */
 #undef  MS_OFF_X
 #define MS_OFF_X       (MSP_MODAL_X + MSP_MODAL_W / 2 - UI(24))
 #undef  MS_HOW_Y
@@ -150,7 +150,7 @@ static void pg_touch(float px, float py, bool down) { setup_touch(&tank, PG_X(px
  * just over it - given as the 1.8's y: on the CYD the same height, 128 px
  * higher (its sand line is y 224, not 352; the 1.8's y 250 is under the CYD's
  * glass, its 200 down in the grass). Exactly y elsewhere. */
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
 #define GRASS_Y(y)     ((y) - (368 - TANK_BOT))
 #else
 #define GRASS_Y(y)     (y)
@@ -158,7 +158,7 @@ static void pg_touch(float px, float py, bool down) { setup_touch(&tank, PG_X(px
 /* (this fork) a spot on the floor given as the 1.8's x: on the CYD the same
  * share of its floor (tank.h's TANK_FLOOR_X) - the 1.8's x 300 is past where
  * the CYD's margins let the plant stand (51..269). Exactly x elsewhere. */
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
 #define FLOOR_X(x)     TANK_FLOOR_X(x)
 #else
 #define FLOOR_X(x)     (x)
@@ -293,7 +293,7 @@ static int selftest_spawn(void) {
     if (t_born < 0) { printf("FAIL: no fry within 2 min of the staging\n"); return 1; }
     if (t_spawn < SPAWN_WAIT_MIN_S - DT || t_spawn > SPAWN_WAIT_MAX_S + DT) { printf("FAIL: the courtship started at %.1f s, not %.0f..%.0f\n", t_spawn, SPAWN_WAIT_MIN_S, SPAWN_WAIT_MAX_S); return 1; }
     if (t_in < 0 || t_in > 30) { printf("FAIL: the pair was not courting in the grass within 30 s (%.1f)\n", t_in); return 1; }
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
     const float dance_slack = 1.5f * DT;          /* (this fork) a frame for the sighting, and half a frame for the float times: on
                                                      the CYD the fry lands 599 frames in, which i * DT puts one ulp under 599 * DT */
 #else
@@ -378,7 +378,7 @@ static int selftest_pop(void) {
            frees it. The bar fills as the film comes off. */
         film_just_over(&tank, ALGAE_DIRTY);                                 /* just over the line */
         progression_next_fry(&tank, req, &staged);
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
         const float nearly_full = 1.0f - 1.0f / ALGAE_CELLS / ALGAE_DIRTY - 1e-4f;   /* (this fork) one cell over: one of the CYD's
                                                                                        300 is 2.2% of the bar (one of 644, 1%) */
 #else
@@ -804,7 +804,7 @@ static int night_shift_check(void) {
     return 0;
 }
 
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
 /* (this fork) which SLEEP segment the settings page drew lit, read off the
    frame rather than the tap test, so a row that taps right but draws wrong
    still fails. The pixel 3 down inside each segment (under its double
@@ -1026,7 +1026,7 @@ static int selftest_sleep(void) {
                 printf("selftest-sleep: SCREEN: NORMAL by default, TURNED and back, saved\n");
             }
 #else
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
             /* (this fork) the CYD's row where the others have ROTATION is chosen
                at run time: SCREEN with no IMU (the platform applies it); with
                one, ROTATION - tested below. Under it, IMU or not, SLEEP:
@@ -1087,7 +1087,7 @@ static int selftest_sleep(void) {
                 r = SET_TAP_AT(SETP_SEG_X(0), rot_y);
                 printf("selftest-sleep: ROTATION: follows the tank by default, locks the way up it has (either way), saved, unlocks\n");
             }
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
             render_settings_set_imu(false);
 #endif
 #endif
@@ -1217,7 +1217,7 @@ static int saves_check(const char *what, const uint8_t *e, float bubble_default)
         tank.sd_unlocks != (sv_u32(e, 1488) & ((1u << SD_ITEM_COUNT) - 1))) SV_FAIL("sand dollars %d (earned %d), unlocks %02x", tank.sd_balance, tank.sd_earned, tank.sd_unlocks);
     if (tank.snail_grazed != (int32_t)sv_u32(e, 1612)) SV_FAIL("the snail's tally %d", (int)tank.snail_grazed);
     float castle_x = sv_f32(e, 1616);
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
     if (castle_x > 0) {                                  /* (this fork) where the CYD's floor lets it stand, as the bubble column:
                                                             the fixtures' 250 is past the end of its 320 px floor. The CYD's
                                                             alone: on the other boards a saved castle that moved is a failure */
@@ -1282,13 +1282,13 @@ static int selftest_saves(void) {
            old layout (300 algae cells, the tail 344 bytes early): only the CYD
            reads it (progression.c's load_save moves the tail) */
         bool cyd_layout = strstr(names[k], "-cyd.sav") != NULL;
-#ifndef CONFIG_POCKET_TANK_BOARD_CYD_320X240
-        if (cyd_layout) { printf("selftest-saves: %s: the CYD's old layout - the CYD's own (make BOARD_CYD_320X240=1)\n", names[k]); continue; }
+#ifndef CONFIG_POCKET_TANK_320X240
+        if (cyd_layout) { printf("selftest-saves: %s: the CYD's old layout - the CYD's own (make 320X240=1)\n", names[k]); continue; }
 #endif
         /* today's layout: a 1432-byte save is the pre-bubble one - bubble_x (4 zero bytes) goes back in at 1404 */
         memset(cur, 0, sizeof cur); size_t curlen = len;
         if (len == 1432) { memcpy(cur, file, 1404); memcpy(cur + 1408, file + 1404, 28); curlen = 1436; }
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
         else if (cyd_layout) { memcpy(cur, file, 760); memcpy(cur + 1104, file + 760, len - 760); curlen = len + 344; }   /* the tail back past the 644 cells */
 #endif
         else memcpy(cur, file, len);
@@ -1305,7 +1305,7 @@ static int selftest_saves(void) {
                 memcpy(e, cur, 1436); memset(e + 1404, 0, 4);
                 memcpy(cut, cur, 1404); memcpy(cut + 1404, cur + 1408, 28);
             }
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
             else if (cyd_layout && at == len) { memcpy(e, cur, curlen); memcpy(cut, file, len); }   /* the file as the CYD wrote it */
 #endif
             else { memcpy(e, cur, at); memcpy(cut, cur, at); }
@@ -1381,7 +1381,7 @@ static int selftest_update(void) {
     /* the settings page's UPDATES button, and the UPDATES page's taps */
     { int v = 0, r;
       render_settings_touch(&tank, PG_X(SET_UPD_X + 40), PG_Y(SET_FOOT_Y + 12), true, &v); r = render_settings_touch(&tank, PG_X(SET_UPD_X + 40), PG_Y(SET_FOOT_Y + 12), false, &v);
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240 /* (this fork) the CYD has no update channel, so no UPDATES button: its spot is the version line */
+#ifdef CONFIG_POCKET_TANK_320X240 /* (this fork) the CYD has no update channel, so no UPDATES button: its spot is the version line */
       EXPECT(r != SET_TAP_UPDATES, "settings: the CYD has an UPDATES button (%d)", r);
 #else
       EXPECT(r == SET_TAP_UPDATES, "settings: the UPDATES button -> %d", r);
@@ -1587,7 +1587,7 @@ static int selftest_tend(void) {
            (VEG_PACE_SPREAD) - it never regrows as a hedge */
         {
             tank_t cut; tank_init(&cut, 777); progression_boot(&cut);
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
             const int cb = 2;                              /* (this fork) the CYD's floor leaves bed 1 three fronds, too few
                                                               to show a spread (0.55..0.57): bed 2's eight */
 #else
@@ -1667,7 +1667,7 @@ static int selftest_tend(void) {
     {
         float g0[VEG_BEDS]; memcpy(g0, tank.veg_growth, sizeof g0);
         const float sy = TANK_BOT - 30.0f;               /* one full-width stroke, glass to glass */
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
         /* (this fork) right to left: the CYD's reef bed stands 18 px from the left glass, so a stroke begun there starts
            beside its first frond (SLASH_START_SIDE_PX) - aimed at the bed, not the mid-glass start this is about */
         for (float sx = tank_glass_x1(sy) - 2; sx > tank_glass_x0(sy) + 2; sx -= 6)
@@ -1693,7 +1693,7 @@ static int selftest_tend(void) {
         tank_veg_set(&tank, 1, 0.3f); tank.veg_h[1][0] = 1.0f; tank_veg_sync(&tank);
         float before[VEG_FRONDS_MAX]; memcpy(before, tank.veg_h[1], sizeof before);
         float fx2; tank_veg_frond(&tank, 1, 2, &fx2);
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
         const float scrub_y0 = 102;                     /* (this fork) the CYD's sand line is y 224, so the short fronds' tips stand at
                                                            ~122 and the 1.8's 150 is in among them: 20 px over the tips instead, on the
                                                            zigzag's right-hand step as there (its left one is beside the tall frond 0) */
@@ -1767,7 +1767,7 @@ static int selftest_tend(void) {
         tank_tick(&tank, 1.0f / 60.0f, advisor_rules); tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
         if (tank.veg_h[1][n - 1] < 0.90f) { printf("FAIL: a stroke heading away from the wall cut the wall frond\n"); return 1; }
         for (float sx = fl - 70; sx <= fl - 19; sx += 4) tank_touch_drag(&tank, sx, GRASS_Y(200.0f));     /* to the wall, lifting 19+ px short of the spine */
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
         /* (this fork) the CYD's outer frond stands 27 px from the glass, not 24, so those 4 px steps lift 22 px short of it -
            49 px from the glass, past the 20..45 px short of the wall a real stroke lifts (above): a last step at 45 */
         tank_touch_drag(&tank, TANK_FX1 - 45, GRASS_Y(200.0f));
@@ -1776,7 +1776,7 @@ static int selftest_tend(void) {
         printf("selftest-tend: the lone wall frond (spine %.0f), a stroke from open water lifting 19 px short: 0.90 -> %.2f (want %.2f)\n", fl, tank.veg_h[1][n - 1], want);
         if (fabsf(tank.veg_h[1][n - 1] - want) > 0.02f) { printf("FAIL: the lone wall frond stood\n"); return 1; }
         tank_veg_set(&tank, 1, 1.0f);
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
         const float on_bed = fl - 35;                     /* (this fork) the CYD's bed 1 is three fronds, so fl - 48 is in bed 2: 11 px
                                                              left of bed 1's first frond, and still the 16 px a stroke needs to cut */
 #else
@@ -1940,7 +1940,7 @@ static int selftest_tend(void) {
     f->trust = 9; f->hunger = 1; f->energy = 10; f->stress = 0;
     f->goal.id = GOAL_EXPLORE; f->goal.urgency = 2;
     tank.ravenous = false;              /* isolate the hold reflex (no progression_tick here) */
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
     const float hdx = -40;              /* (this fork) the CYD's glass ends at x 320 and its grass stands far higher (GRASS_Y): the
                                            finger just over the grass, as on the 1.8, and 70 px from the right glass, not 30 */
 #else
@@ -2523,7 +2523,7 @@ static int snapshot(const char *prefix, int seconds) {
     tank.fish[1].ms_seen &= ~MS_FIRST_MEAL_FROM_YOU; tank.tank_ms_seen &= ~TMS_FIRST_FULL_NIGHT;
     render_milestones(&tank, fb, TANK_W);
     snprintf(path, sizeof path, "%s_milestones.ppm", prefix); write_ppm(path, fb);
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
     render_milestones_tap(&tank, PG_X(MSP_NAME_X + 8), PG_Y(MS_TANK_Y));              /* (this fork) the CYD's TANK name: its own column */
 #else
     render_milestones_tap(&tank, PG_X(100), PG_Y(MS_TANK_Y));                          /* TANK's name: the tally, the school drawn over it */
@@ -2531,7 +2531,7 @@ static int snapshot(const char *prefix, int seconds) {
     render_milestones(&tank, fb, TANK_W);
     snprintf(path, sizeof path, "%s_milestones_tank.ppm", prefix); write_ppm(path, fb);
     { int n_keep = tank.n_fish; tank.n_fish = 3;                                       /* three of six: the open places dim */
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
       render_milestones_leave(); render_milestones_tap(&tank, PG_X(MSP_NAME_X + 8), PG_Y(MS_TANK_Y));
 #else
       render_milestones_leave(); render_milestones_tap(&tank, PG_X(100), PG_Y(MS_TANK_Y));
@@ -2546,7 +2546,7 @@ static int snapshot(const char *prefix, int seconds) {
         tank.sd_unlocks |= SD_ITEM_SHRIMP; tank.tank_ms_bits |= TMS_FULL_SCHOOL; tank.tank_ms_seen = tank.tank_ms_bits & ~TMS_FULL_SCHOOL;
         render_milestones(&tank, fb, TANK_W);
         snprintf(path, sizeof path, "%s_milestones_shrimp.ppm", prefix); write_ppm(path, fb);
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
         render_milestones_tap(&tank, PG_X(MSP_TPG_X + 12), PG_Y(MS_TANK_Y));             /* (this fork) the CYD's page arrow */
 #else
         render_milestones_tap(&tank, PAGE_X + 426, PAGE_Y + 254 + 20);
@@ -2562,7 +2562,7 @@ static int snapshot(const char *prefix, int seconds) {
     render_settings(&tank, fb, TANK_W, 60, 2);                     /* AUTO after 3 MIN, AUTO FEED off, the way up locked */
     snprintf(path, sizeof path, "%s_settings_auto.ppm", prefix); write_ppm(path, fb);
     tank_light_choice_set(&tank, 0); tank.autofeed_off = false; tank_orient_lock(&tank, false);
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
     /* (this fork) the CYD once an IMU answers: ROTATION where SCREEN was, and
        the SLEEP row on SCREEN, the middle segment - then back as it was */
     render_settings_set_imu(true); render_settings_set_sleep(SET_SLEEP_SCREEN);
@@ -2632,21 +2632,21 @@ static int snapshot(const char *prefix, int seconds) {
     snprintf(path, sizeof path, "%s_shop.ppm", prefix); write_ppm(path, fb);
     tank.sd_balance = 95; render_shop(&tank, fb, TANK_W);
     snprintf(path, sizeof path, "%s_shop_rich.ppm", prefix); write_ppm(path, fb);
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
     render_shop_tap(&tank, PG_X(SHOP_ROW_X), PG_Y(SHOP_ROW_Y(1))); render_shop(&tank, fb, TANK_W);   /* (this fork) the CYD's shop rows */
 #else
     render_shop_tap(&tank, PAGE_X + 100, PAGE_Y + 98 + 56 + 20); render_shop(&tank, fb, TANK_W);      /* the snail's row -> its modal */
 #endif
     snprintf(path, sizeof path, "%s_shop_modal.ppm", prefix); write_ppm(path, fb);
     render_shop_leave();
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
     render_shop_tap(&tank, PG_X(SHOP_ROW_X), PG_Y(SHOP_ROW_Y(0))); render_shop(&tank, fb, TANK_W);
 #else
     render_shop_tap(&tank, PAGE_X + 100, PAGE_Y + 98 + 20); render_shop(&tank, fb, TANK_W);           /* the plant's row -> its modal (the long second line) */
 #endif
     snprintf(path, sizeof path, "%s_shop_plant.ppm", prefix); write_ppm(path, fb);
     render_shop_leave();
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
     render_shop_tap(&tank, PG_X(SHP_EARN_X + 28), PG_Y(MSP_CLOSE_Y + 8)); render_shop(&tank, fb, TANK_W);
 #else
     render_shop_tap(&tank, PAGE_X + 60, PAGE_Y + 320); render_shop(&tank, fb, TANK_W);                /* HOW TO EARN */
@@ -2699,7 +2699,7 @@ static int snapshot(const char *prefix, int seconds) {
       tank.urchin_grazed_px = 1234; render_stats_card(&tank, RENDER_CARD_URCHIN, fb, TANK_W);
       snprintf(path, sizeof path, "%s_urchin_card.ppm", prefix); write_ppm(path, fb); }
     tank.sd_unlocks = 0; tank.sd_balance = 0;
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
     render_milestones_tap(&tank, PG_X(MS_BADGE_X(0)), PG_Y(MS_ROW(1) + MS_BADGE_DY));   /* (this fork) the CYD's rows */
 #else
     render_milestones_tap(&tank, PAGE_X + 176 + 16, PAGE_Y + 4 + 40 + 20);           /* fish 1's first badge -> the detail modal */
@@ -2806,14 +2806,14 @@ static int snapshot(const char *prefix, int seconds) {
         tank.tank_ms_seen = tank.tank_ms_bits;
         render_milestones(&tank, fb, TANK_W);
         snprintf(path, sizeof path, "%s_milestones_fry.ppm", prefix); write_ppm(path, fb);
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
         render_milestones_tap(&tank, PG_X(MS_BADGE_X(0)), PG_Y(MS_ROW(2) + MS_BADGE_DY));   /* (this fork) the CYD's rows */
 #else
         render_milestones_tap(&tank, PAGE_X + 176 + 16, PAGE_Y + 4 + 2 * 40 + 20);        /* the TRUST gate -> its modal */
 #endif
         render_milestones(&tank, fb, TANK_W);
         snprintf(path, sizeof path, "%s_fry_modal.ppm", prefix); write_ppm(path, fb);
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
         render_milestones_tap(&tank, PG_X(MS_HOW_X + MSP_HOW_W / 2), PG_Y(MS_HOW_Y + MSP_HOW_H / 2));   /* (this fork) the scaled modal's HOW? */
 #else
         render_milestones_tap(&tank, PAGE_X + 56 + 336 / 2, PAGE_Y + 60 + 156 + 20 + 24 + 32 + 14 - 10 - 16);   /* HOW? -> the tip page */
@@ -2821,7 +2821,7 @@ static int snapshot(const char *prefix, int seconds) {
         render_milestones(&tank, fb, TANK_W);
         snprintf(path, sizeof path, "%s_fry_tip.ppm", prefix); write_ppm(path, fb);
         render_milestones_leave();
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
         render_milestones_tap(&tank, PG_X(MSP_NAME_X + 8), PG_Y(MS_ROW(2) + MS_NAME_DY));   /* (this fork) the CYD's rows */
 #else
         render_milestones_tap(&tank, PAGE_X + 100, PAGE_Y + 4 + 2 * 40 + 10);              /* the name -> the tally */
@@ -2925,7 +2925,7 @@ static int snapshot(const char *prefix, int seconds) {
         snprintf(path, sizeof path, "%s_place_cluster.ppm", prefix); write_ppm(path, fb);
         setup_cancel(&tank);
         tank.sd_unlocks |= SD_ITEM_CASTLE; tank_castle_place(&tank);
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
         render_shop_leave(); render_shop(&tank, fb, TANK_W); render_shop_tap(&tank, PG_X(SHOP_ROW_X), PG_Y(SHOP_ROW_Y(2)));
         render_shop(&tank, fb, TANK_W); render_shop_tap(&tank, PG_X(SHOP_SELL_X), PG_Y(SHOP_BTN_Y));   /* (this fork) SELL, armed, in the CYD's modal */
 #else
@@ -2940,7 +2940,7 @@ static int snapshot(const char *prefix, int seconds) {
         snprintf(path, sizeof path, "%s_place_sell.ppm", prefix); write_ppm(path, fb);
         setup_cancel(&tank); tank.sd_unlocks &= ~SD_ITEM_CASTLE;
         render_shop_leave(); render_shop(&tank, fb, TANK_W);
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
         render_shop_tap(&tank, PG_X(SHOP_NEXT_X), PG_Y(SHOP_ARROW_Y));                 /* (this fork) the CYD's header arrow */
 #else
         render_shop_tap(&tank, PAGE_X + 400, PAGE_Y + 30);                              /* the header's right arrow: page 2 */
@@ -3094,7 +3094,7 @@ static int selftest_shop(void) {
     /* colonies: three 2 x 2 patches, one stroke through each */
     {
         memset(tank.algae, 0, sizeof tank.algae);
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
         int c0[3] = { 3, 9, 15 };                 /* (this fork) the CYD's glass is 20 cells wide: column 21 is off it (and
                                                      wrapped onto the next row, it joined patch 0) */
 #else
@@ -3128,14 +3128,14 @@ static int selftest_shop(void) {
         int n; float x0, x1; tank_veg_bed(&tank, 1, &x0, &x1, NULL, &n);
         tank.trim_px = (SD_TRIM_CM - 100) * PX_PER_CM; tank.sd_inches_paid = 0;
         float px0 = tank.trim_px;
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
         /* (this fork) on the CYD's floor bed 2's last fronds stand among bed 1's three: at nubs for the sweep, so it mows
            bed 1 alone, and back after */
         float bed2[VEG_FRONDS_MAX]; memcpy(bed2, tank.veg_h[2], sizeof bed2); tank_veg_set(&tank, 2, VEG_NUB);
 #endif
         for (float sx = x0 + 2; sx <= x1; sx += 4) tank_touch_drag(&tank, sx, TANK_BOT - 8.0f);
         SHOP_TICK(2);
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
         memcpy(tank.veg_h[2], bed2, sizeof bed2); tank_veg_sync(&tank);
 #endif
         float cut = tank.trim_px - px0, expect = n * (1.0f - VEG_NUB) * (VEG_SEGS_FULL - 1) * VEG_PAY_PX;   /* paid at the 1.8's pitch on every board */
@@ -3176,7 +3176,7 @@ static int selftest_shop(void) {
         want -= SD_PRICE_SNAIL; SHOP_WANT("after the snail");
         if (!(tank.sd_unlocks & SD_ITEM_SNAIL) || tank.snail_x < 0) { printf("FAIL: no snail on the glass\n"); return 1; }
         memset(tank.algae, 0, sizeof tank.algae);
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
         const int patch_row = 10;                  /* (this fork) the CYD's glass is 15 cells tall: row 18 is under it */
 #else
         const int patch_row = 18;
@@ -3238,7 +3238,7 @@ static int selftest_shop(void) {
         if (progression_sell(&tank, 6)) { printf("FAIL: the urchin sold back\n"); return 1; }
         float veg_was[VEG_BEDS_MAX][VEG_FRONDS_MAX]; memcpy(veg_was, tank.veg_h, sizeof veg_was);   /* put back after: the tests below place the plant among the beds */
         for (int b = 0; b < VEG_BEDS; b++) tank_veg_set(&tank, b, 0.45f);
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
         const int tf = 2;                                     /* (this fork) the CYD's bed 1 has three fronds: slot 3 is not one */
 #else
         const int tf = 3;
@@ -4306,7 +4306,7 @@ static int selftest_card(const char *prefix) {
 }
 
 int main(int argc, char **argv) {
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
     render_settings_set_sleep(SET_SLEEP_LIGHT);   /* (this fork) the CYD's SLEEP row starts where the CYD's build does (sdkconfig.defaults.cyd) */
 #endif
     for (int a = 1; a < argc; a++)
@@ -4441,7 +4441,7 @@ int main(int argc, char **argv) {
             else if (r == SET_TAP_IDLE) printf("lights out after %d s still\n", v);
             else if (r == SET_TAP_FEED) printf("auto feed: %s\n", v ? "ON" : "OFF");
             else if (r == SET_TAP_ROTATE) printf("rotation: %s\n", v ? "LOCKED" : "unlocked");
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
             else if (r == SET_TAP_SLEEP) {                     /* (this fork) the CYD's SLEEP row: the firmware keeps it in NVS */
                 render_settings_set_sleep(v);
                 const char *name = "LIGHT";

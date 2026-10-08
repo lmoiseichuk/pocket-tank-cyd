@@ -889,9 +889,11 @@ static void tank_task(void *arg) {
         bool live = orientation_flipped();   /* no auto-flip: the keeper's SCREEN choice alone (the IMU still senses handling) */
 #endif
         bool inv = tank_orient(&tank, live);   /* the live flip, or the way up settings' ROTATION locked (0.3.2) */
-#if CONFIG_POCKET_TANK_BOARD_CYD_320X240
-        /* (this fork) the CYD offers ROTATION only with an IMU answering
-           (render_settings_set_imu, below); without one its row is SCREEN.
+#if CONFIG_POCKET_TANK_320X240
+        /* (this fork) a 320x240 board offers ROTATION only with an IMU
+           answering in a face-down build (render_settings_set_imu, below) -
+           the CYD with its MPU-6050; otherwise its row is SCREEN (the
+           Touch-LCD-2, whose IMU does not run the gesture).
            A lock saved while an IMU answered stays in the save but does not
            hold the picture then: SCREEN could not turn it, and no row could
            unlock it. */
@@ -984,9 +986,10 @@ static void tank_task(void *arg) {
                 render_milestones(&tank, fb[cur], TANK_W);
                 sel = -1;
             } else if (touch_port_settings()) {  /* settings page: brightness + volume */
-#if CONFIG_POCKET_TANK_BOARD_CYD_320X240
-                /* the CYD's row is chosen at run time (common/render.h): SCREEN with
-                   no IMU, ROTATION with one; SLEEP under it, but not on a deepsleep build */
+#if CONFIG_POCKET_TANK_320X240
+                /* (this fork) a 320x240 board's row is chosen at run time (common/render.h):
+                   SCREEN with no IMU, ROTATION with one in a face-down build; SLEEP under
+                   it on the CYD, but not on a deepsleep build (the Touch-LCD-2 is one) */
                 render_settings_set_flip(orientation_flipped());
 #if CONFIG_POCKET_TANK_IMU_FACE_DOWN_SLEEP
                 render_settings_set_imu(s_imu);
@@ -1134,11 +1137,11 @@ static void nvs_start(void) {
  * tank is saved as it is before sleep, then the board restarts into update
  * mode (update_mode.c) - the radio never runs beside the tank */
 static void request_update(void) {
-#if CONFIG_POCKET_TANK_BOARD_CYD_320X240
-    /* the CYD has no update channel (no manifest of its own, one board, flashed
-       by cable: CYD.md): no restart into update mode, which app_main
-       would not enter anyway */
-    ESP_LOGW(TAG, "update check: the CYD is updated by cable (tools/build_cyd.sh), not over the air");
+#if CONFIG_POCKET_TANK_320X240
+    /* (this fork) the 320x240 boards have no update channel (no manifest of
+       their own, flashed by cable: CYD.md): no restart into update mode,
+       which app_main would not enter anyway */
+    ESP_LOGW(TAG, "update check: a 320x240 board is updated by cable (CYD.md), not over the air");
     return;
 #endif
     touch_port_confirm_answer(-1);
@@ -1152,8 +1155,8 @@ void device_update_check(void) { request_update(); }
 /* the installer page asked a RUNNING tank for the networks (its Connect to /
  * Change Wi-Fi): saved the same way, then the restart into provisioning mode */
 void device_provision_request(void) {
-#if CONFIG_POCKET_TANK_BOARD_CYD_320X240
-    ESP_LOGW(TAG, "provisioning: the CYD has no update channel, so no Wi-Fi to set up");
+#if CONFIG_POCKET_TANK_320X240
+    ESP_LOGW(TAG, "provisioning: a 320x240 board has no update channel, so no Wi-Fi to set up");
     return;
 #endif
     touch_port_confirm_answer(-1);
@@ -1209,10 +1212,10 @@ void app_main(void) {
     if (board_is_watch()) battery_port_pin_rail("aldo2");   /* the watch's panel power enable is pulled up to ALDO2 */
     battery_port_trim_rails();        /* the schematic's unused outputs off (docs/HANDOFF.md, the battery pass) */
     battery_port_key_init();          /* the PWR key: sleep / power-off IRQs on, the power-on press cleared */
-#if CONFIG_POCKET_TANK_BOARD_CYD_320X240
-    /* the CYD: no update mode and no provisioning wait (it would hold the glass
-       dark 8 s after every reset over USB with no network saved). The request
-       word is still read, so a stale one is cleared. */
+#if CONFIG_POCKET_TANK_320X240
+    /* (this fork) a 320x240 board: no update mode and no provisioning wait (it
+       would hold the glass dark 8 s after every reset over USB with no network
+       saved). The request word is still read, so a stale one is cleared. */
     (void)update_mode_pending();
 #else
     if (update_mode_pending()) { brightness_apply(false); update_mode_run(fb[0]); }

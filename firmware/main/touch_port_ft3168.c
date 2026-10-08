@@ -64,7 +64,7 @@ static bool s_inverted;                           /* screen 180-flipped: mirror 
  * same reason; Strato saw it on the swatch rows, 2026-09-13). Reported
  * points move UP by this many px in displayed space; director `touch bias
  * <px>` tunes it live. */
-#if CONFIG_POCKET_TANK_TANK_320X240
+#if CONFIG_POCKET_TANK_320X240
 /* None on the CYD (2026-09-26): with the AMOLED's 10 px every missed button
  * in the first setup walk-through read ABOVE the button, never below it.
  * The Touch-LCD-2 is the same size of glass and starts from the same 0. */
@@ -227,7 +227,7 @@ static bool panel_read(uint16_t *x, uint16_t *y) {
     return true;
 }
 
-#if CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#if CONFIG_POCKET_TANK_CYD_320X240
 /* The CYD's FT6336G (the same FT5x06 register family) on the shared bus, with
  * its reset on GPIO18. The driver's swap_xy turns its portrait report
  * landscape; what is left for touch_port_poll is a 180-degree turn, found on
@@ -251,7 +251,7 @@ static bool ft6336_init(void) {
     ESP_LOGI(TAG, "FT6336 ready");
     return true;
 }
-#elif CONFIG_POCKET_TANK_BOARD_TLCD2
+#elif CONFIG_POCKET_TANK_WST_320X240
 /* The Touch-LCD-2's CST816D (the CST816S driver's register set, as on the
  * AMOLED's V2 board) on the shared bus, reporting in the panel's portrait
  * frame. The driver mirrors first, then swaps: x = raw y, y = 239 - raw x,
@@ -278,9 +278,9 @@ static bool cst816d_init(void) {
 }
 #endif
 bool touch_port_init(void) {
-#if CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#if CONFIG_POCKET_TANK_CYD_320X240
     return ft6336_init();
-#elif CONFIG_POCKET_TANK_BOARD_TLCD2
+#elif CONFIG_POCKET_TANK_WST_320X240
     return cst816d_init();
 #endif
     if (board_is_round()) return cst9217_init();
@@ -407,9 +407,9 @@ static void map_touch(uint16_t px, uint16_t py, float *tx, float *ty) {
      * 180-degree turn comes after it (cal_view). Until 2026-10-02 the turn came
      * first, and a turned picture's taps were off by the fit's asymmetry: ~15 px
      * on the watch, ~20 at the top of the bowl, ~2 on the 1.8. */
-#if CONFIG_POCKET_TANK_TANK_320X240 && TOUCH_TURN_180 /* the CYD: landscape from the driver (swap_xy), turned 180 degrees (ft6336_init) */
+#if CONFIG_POCKET_TANK_320X240 && TOUCH_TURN_180 /* the CYD: landscape from the driver (swap_xy), turned 180 degrees (ft6336_init) */
     int rx = TANK_W - 1 - fx, ry = TANK_H - 1 - fy;
-#elif CONFIG_POCKET_TANK_TANK_320X240                 /* the Touch-LCD-2: landscape from the driver, the right way up (cst816d_init) */
+#elif CONFIG_POCKET_TANK_320X240                 /* the Touch-LCD-2: landscape from the driver, the right way up (cst816d_init) */
     int rx = fx, ry = fy;
 #elif defined(TANK_WATCH)                             /* the watch's portrait tank: the panel's px are the tank's */
     int rx = fx, ry = fy;
@@ -757,7 +757,7 @@ bool touch_port_finger_now(void) {
     return esp_lcd_touch_get_data(s_tp, point, &n, 1) == ESP_OK && n > 0;
 }
 void touch_port_swallow(void) { s_swallow = true; }
-#if CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#if CONFIG_POCKET_TANK_CYD_320X240
 /* The FT6336's INT on GPIO17 (board_pins.h), which the game never uses: it
  * polls. Not yet seen on the bench, and the driver never sets the chip's
  * G_MODE, so whether it holds low through a touch or pulses is the chip's

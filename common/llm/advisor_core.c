@@ -20,7 +20,7 @@ float advisor_core_temp   = 1.0f;
  * see "far", and the model would be asked about distances it never learned.
  * Only there: upstream's own boards (the bowl's 466, the watch's 410) keep
  * the bands as upstream feeds them to the model. */
-#ifdef CONFIG_POCKET_TANK_BOARD_CYD_320X240
+#ifdef CONFIG_POCKET_TANK_320X240
 #define SCHEMA_SCALE (TANK_W / 448.0f)
 #else
 #define SCHEMA_SCALE 1.0f
