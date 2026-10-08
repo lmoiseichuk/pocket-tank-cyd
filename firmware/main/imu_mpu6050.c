@@ -29,7 +29,7 @@
 /* which accel axis is "up" when the CYD is held right side up, and which
  * points out of the glass. The breakout is hand-mounted, so these are bench
  * facts: hold the board upright, run the director's `imu`, and read which axis
- * carries ~16k and with what sign (docs/CYD.md). */
+ * carries ~16k and with what sign (CYD.md). */
 #define UP_AXIS   CONFIG_POCKET_TANK_IMU_MPU6050_UP_AXIS
 #define OUT_AXIS  CONFIG_POCKET_TANK_IMU_MPU6050_OUT_AXIS
 /* a Kconfig bool that is off is not defined at all, so test it, not its value */

@@ -178,3 +178,20 @@ void display_port_flush(const uint16_t *fb) {
         current ^= 1;
     }
 }
+
+/* ---- the board questions upstream's ports ask (display_port.h, v0.3.0) ----
+ * The CYD is none of the Waveshare boards: no round glass, no watch, no IO
+ * expander, no PWR key sense line, no panel deep standby or QSPI bus to hold,
+ * and the frame IS the panel - so each answer is the plain one. */
+bool board_is_round(void) { return false; }
+bool board_is_watch(void) { return false; }
+bool board_has_expander(void) { return false; }
+int  board_pwr_sense_pin(void) { return -1; }
+void display_port_deep_sleep_pins(bool tp_awake_high) { (void)tp_awake_high; }
+void display_port_deep_sleep_bus(void) { }
+void display_port_deep_standby(void) { }
+void display_port_frame_origin(int *px, int *py) { *px = 0; *py = 0; }
+void display_port_set_view(int view) { (void)view; }
+int  display_port_view(void) { return DISPLAY_VIEW_FIT; }
+void display_port_panel_to_tank(int px, int py, float *tx, float *ty) { *tx = (float)px; *ty = (float)py; }
+void display_port_flush_prof(int64_t *wait_us, int64_t *send_us) { *wait_us = 0; *send_us = 0; }

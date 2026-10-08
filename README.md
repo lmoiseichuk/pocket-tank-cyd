@@ -1,5 +1,20 @@
 # pocket-tank 🐟
 
+> **This fork** runs the tank on the 2.8-inch ES3C28P "cheap yellow display"
+> (CYD) as well as on upstream's three Waveshare boards. What it changes
+> against upstream:
+>
+> - a fourth board, `CONFIG_POCKET_TANK_BOARD_CYD_320X240`: a 320 x 240 tank, built and flashed with `tools/build_cyd.sh`
+> - every page laid out for a 240 px glass: a two-column stats card, 24 px badges, a full-width shop and settings page
+> - two settings rows of the CYD's own: SCREEN (ROTATION once an IMU answers) and SLEEP (NEVER / SCREEN / LIGHT)
+> - two sleep modes that never deep-sleep, screen and lightsleep: the glass goes dark and wakes on a touch, a pick-up or BOOT
+> - an MPU-6050 beside the QMI8658, probed at boot; on the CYD an IMU breakout on its I2C socket, and face down sleeps the tank
+> - on the CYD, no updates over Wi-Fi, no battery page, no PWR key and no clock chip
+> - the simulator's fourth world, `make -C sim BOARD_CYD_320X240=1`, and `make -C sim check-all` across all four
+>
+> Using it, building and flashing it, and syncing the fork with upstream:
+> **[CYD.md](CYD.md)**.
+
 **A tiny language model keeps a fish tank alive on an $8 chip.**
 The ESP32-S3 board, with screen and battery used in this project is actually around $35.
 
@@ -26,14 +41,24 @@ wall clear last explore time day  ->  seek_food urgency 8
 
 This repo is the complete project: the trained model, the distillation
 pipeline that made it, a PC simulator, and the firmware for a real board.
-Got the board? **[Install it from your browser](https://stratobuilds.com/pocket-tank-installer/)**,
-no toolchain needed. Got the 2.8-inch **CYD** (ES3C28P) instead? This fork
-runs there too: **[build and flash it](#run-it-on-the-28-cyd)** with one
-script.
+Got the board? **[Install it from your browser](https://pocketank.com/install/)**,
+no toolchain needed.
 
-The current release is **v0.2.0** (alpha); the settings page shows the one
+The current release is **v0.3.3** (alpha); the settings page shows the one
 on your tank. What changed in each release:
 **[pocketank.com/updates](https://pocketank.com/updates/)**.
+
+It runs on three Waveshare boards: the 1.8-inch original, the round
+1.75-inch **pendant**, where the tank fills the whole circle like a little
+fishbowl, and the 2.06-inch **watch**, a tall tank you can wear. Same fish,
+same shop, same saves on all three. From 0.3 on a tank updates itself
+over Wi-Fi, so the cable is only for the first install.
+
+| The 1.8 | The pendant | The watch |
+|:---:|:---:|:---:|
+| <img src="docs/media/board-amoled18.webp" width="220" alt="The Waveshare 1.8-inch board from the front: a black rectangle with rounded corners"> | <img src="docs/media/board-round175c.webp" width="220" alt="The Waveshare 1.75C board from the front: a round screen in a silver aluminum ring"> | <img src="docs/media/board-watch206.webp" width="220" alt="The Waveshare 2.06-inch watch on its strap"> |
+
+![The same tank on the 1.8, the pendant and the watch](docs/media/sim-three-boards.png)
 
 ## Contents
 
@@ -45,7 +70,6 @@ on your tank. What changed in each release:
 - [Try it: firmware in QEMU](#try-it-firmware-in-qemu)
 - [Install from your browser](#install-from-your-browser)
 - [Run it on real hardware](#run-it-on-real-hardware)
-- [Run it on the 2.8" CYD](#run-it-on-the-28-cyd)
 - [Train your own](#train-your-own)
 - [Layout](#layout)
 - [Documentation](#documentation)
@@ -172,6 +196,17 @@ a bed down to nubs. Algae films the glass over hours and a drag across it
 squeegees it clean. Fish like cover: grass calms them, and only a tank truly
 smothered by two beds at the ceiling stresses them.
 
+**The sponge and the scissors.** One stroke can wipe and trim at once, and
+sometimes you only want one. Tap a fish and look under its card: two small
+tools. Pick the sponge and your strokes only wipe algae and leave the grass
+alone; pick the scissors and they only trim. While a tool is in your hand
+the glass takes its strokes and nothing else: no feeding, no cards, no
+light, no moving a decoration. A DONE chip sits top left: tap it to put the
+tool back, or leave it and it goes back by itself after two minutes.
+
+![The sponge and the scissors under a fish's card](docs/media/sim-tools.png)
+![The scissors in hand: DONE at the top left](docs/media/sim-tool-done.png)
+
 **Milestones.** Tap MORE on the open stats card for the milestones page: a row per
 fish with its sprite at its real size, its name and a growth strip, then a
 badge for each first it has chosen to do: first meal from you, first
@@ -199,7 +234,23 @@ MUST HAVE TRUST OF AT LEAST 6 OUT OF 10 / LOWEST NOW 4.1"), and HOW? for a
 tip on how to get there. Tap the name for the tally. When every step is
 done, the parents court in the grass and the fry is born within the minute.
 
+**Rename or sell a fish.** On the milestones page, tap a fish's name to
+open its card. RENAME brings back the letter wheel. SELL, tapped twice,
+trades the fish for sand dollars, and older fish are worth more: 5 for a
+fry, 15 for a juvenile, 30 for an adult, 60 for an elder. A tank keeps at
+least two fish, and after a sale the next fry waits for 12 more meals.
+
+**More badges, and the school at a glance.** Each fish can earn *first rest
+in the seagrass*. The tank can earn *a school of ten shrimp*, and the reef
+badge now belongs to the tank: buy the reef cluster and the fish swim over
+to visit it. When the tank's row of badges is full, an arrow (or a swipe
+along the row) shows its next page. Tap the tank's fish count to see every
+fish in its own colors, with an outline for each open place.
+
 ![The milestones page](docs/media/sim-milestones.png)
+![A fish's card: RENAME and SELL](docs/media/sim-fish-card.png)
+![Renaming a fish on the letter wheel](docs/media/sim-fish-rename.png)
+![The tank's school at a glance](docs/media/sim-tank-tally.png)
 ![A badge's panel, with its arrows](docs/media/sim-milestone-modal.png)
 ![The NEW FRY row, and a gate's tip](docs/media/sim-milestones-fry.png)
 ![A gate's HOW? tip](docs/media/sim-fry-how.png)
@@ -218,7 +269,8 @@ things to buy so far. The **sword plant** (40) is a fourth bed of broad
 leaves on the open floor, trimmed and grown and counted as cover like the
 grass. The **snail** (80) grazes the glass clean cell by cell, crawling
 flat across the pane with its head leading, and walks the floor upright
-when there is nothing to eat; it keeps working while the tank sleeps, so
+when there is nothing to eat, in front of a piece you placed IN FRONT or
+behind it as it pleases; it keeps working while the tank sleeps, so
 the glass is thinner in the morning. It is drawn the way the fish, the
 grass and the castle are, from a little geometry rather than a sprite, lit
 from the upper left and tinted by the water of its row, and it moves like
@@ -305,6 +357,17 @@ pellets they have eaten, and ten pips toward the next shrimp. Three quick
 taps on them scare them like the fish: they flick away tail first and
 regroup.
 
+**The sea urchin.** The seventh thing in the shop (120). It lives on the
+sand and nibbles the tallest grass down a little at a time. It never cuts
+the grass short and it leaves the sword plant alone, so there is still
+trimming for you to do. Tap it for its card: how much grass it has eaten so
+far, and whether it is grazing or resting.
+
+**The night shift.** The snail and the urchin keep working while the tank
+sleeps. A tank with a snail wakes up with about a third less algae on the
+glass, and a tank with an urchin wakes up to shorter grass. Helpers take
+the edge off a long sleep; they never take the chores away.
+
 **Selling back, and the short way to a piece.** Tap and hold a still
 finger on any decoration in the tank and its placement page opens right
 there, with MOVE, DEPTH and, in the top-left corner, SELL. The same SELL
@@ -330,6 +393,8 @@ sale; they are permanent residents.
 ![The shop's second page](docs/media/sim-shop2.png)
 ![The shrimp school drifting up to the top of the grass](docs/media/sim-shrimp.png)
 ![The shrimp school's card](docs/media/sim-shrimp-card.png)
+![The sea urchin on the sand, by the grass](docs/media/sim-urchin.png)
+![The urchin's card](docs/media/sim-urchin-card.png)
 ![The reef cluster on the day it is bought](docs/media/sim-cluster-young.png)
 ![The reef cluster in full bloom](docs/media/sim-cluster.png)
 ![The LAGOON look, IN FRONT](docs/media/sim-cluster-front.png)
@@ -337,12 +402,21 @@ sale; they are permanent residents.
 ![SELL armed in the castle's modal](docs/media/sim-shop-sell.png)
 
 **The light.** Two quick taps on the glass turn the tank light off and on;
-in the dark the fish rest and the palette dims. The settings page has a
-LIGHTS OUT option, AUTO, that hands the light to the tank instead: it
-knows when it is being handled (the motion sensor, or a touch) and goes
-dark by itself after a chosen number of still seconds, so a tank left on
-the desk is asleep until you pick it up. Six hours of device sleep in one
-stretch earns the tank its first full night's sleep.
+in the dark the fish rest and the palette dims. The first time a double-tap
+turns the light off, a small LIGHTS OUT notice says what happened and how
+to turn it back on, once per tank. The settings page has a
+LIGHTS OUT row that can hand the light to the tank instead: step it from
+DOUBLE-TAP to a time, 5 seconds up to 30 minutes. The tank knows when it
+is being handled (the motion sensor, or a touch) and goes dark by itself
+after that long still, so a tank left on the desk is asleep until you pick
+it up. Six hours of device sleep in one stretch earns the tank its first
+full night's sleep.
+
+**Feeding is yours if you want it.** The tank drops a pellet now and then
+when someone is hungry, so nobody goes without. AUTO FEED on the settings
+page turns that off: then every meal is one you gave. Nobody dies of it,
+but a fish left starving in a lit tank slowly loses trust, and feeding it
+stops the loss.
 
 ![The battery page, charging](docs/media/sim-battery-page.png)
 
@@ -356,6 +430,23 @@ charging, about how long it will last (or how long until it is full), how
 long ago it was unplugged, the screen-on time since, and how long a full
 charge lasts. The tank learns those times from its own battery as you use
 it.
+
+**Updates over Wi-Fi.** The settings page has an UPDATES button. Tap CHECK
+FOR UPDATES and the tank pauses, turns its radio on and looks for a newer
+release. The first time, it lists the networks it can see; pick yours and
+type the password on the glass. If there is a new version it downloads it,
+checks it and restarts into it, and your fish are right where you left
+them. Below about 20% battery it asks you to plug in first. If an update
+ever goes wrong, the tank goes back to the version it had. The radio is
+only on during a check: the tank itself still runs with no network at all.
+On the watch, settings also has a SCREEN row: NORMAL, or TURNED if you wear
+it with the buttons toward your elbow. The original and the pendant turn
+their picture over by themselves when you turn the tank over; the ROTATION
+button on the settings page (a padlock in a turning arrow) locks the
+picture the way up it is.
+
+![The updates page](docs/media/sim-updates.png)
+![Choosing a network](docs/media/sim-update-networks.png)
 
 **Habits and continuity.** The tank remembers where you feed it and greets
 the light coming on. A real-time clock tells it how long it was off, so a
@@ -424,9 +515,9 @@ cd sim && make && ./fishsim
 ```
 
 On macOS the Makefile targets x86_64 by default to match an Intel Homebrew
-SDL2; use `make ARCH=` for a native build.  On Linux it builds for the host.
-`make CYD=1` builds `fishsim-cyd`, the tank at the 2.8" CYD's 320 x 240 ([docs/CYD.md](docs/CYD.md)). 
-The trained model (`model/out/model_q4.bin` + `tokenizer.bin`) ships in the repo, so the LLM
+SDL2; use `make ARCH=` for a native build. On Linux it builds for the host.
+The trained model
+(`model/out/model_q4.bin` + `tokenizer.bin`) ships in the repo, so the LLM
 brain works out of the box.
 
 In the window, the mouse is your finger: tap the water surface or drag down
@@ -478,13 +569,25 @@ touch ports are stubs in the QEMU overlay; decisions go to the log.
 
 ## Install from your browser
 
-The easy way onto a board: **https://stratobuilds.com/pocket-tank-installer/**.
+The easy way onto a board: **https://pocketank.com/install/**.
 Plug the Waveshare board into your computer, open the page in Chrome or Edge,
-click *Install Pocket Tank*, pick the port, and watch the bar fill. About
+pick your board (the 1.8, the pendant or the watch), click *Install Pocket
+Tank*, pick the port, and watch the bar fill. Then the page asks for your
+Wi-Fi: the tank's screen stays dark while it lists the networks it can see,
+you pick yours and type the password, and the tank connects to check it
+before it starts. That is what lets it update itself later; you can skip
+it and set it up on the tank instead. About
 8 MB goes over in a minute or two, the board reboots on its own, and two fry
 are waiting.
 
-**Updating is the same click.** The installer never erases the board: it
+**After that, updates come over Wi-Fi.** 0.3 is the last release that
+needs the cable: a tank on 0.2 installs it from the page once, and from
+then on CHECK FOR UPDATES on the settings page does the rest. Each board
+fetches only its own image, every image is signed, and a tank refuses one
+that is not signed by this project or was built for another board.
+[docs/OTA.md](docs/OTA.md) has the design.
+
+**Updating by cable is the same click.** The installer never erases the board: it
 rewrites the app and the model, and the tank's save lives in a part of the
 flash (NVS at `0x9000`) that none of the four parts cover, so your fish,
 their names, trust, history, badges, sand dollars and decorations carry on.
@@ -493,7 +596,7 @@ at the tail, and the one field that went in mid-struct is slid into place on
 load). To start over, hold BOOT and tap the glass for the *Reset tank?*
 prompt; the page also has an "erase and install fresh" button for a board
 that won't get that far. The settings page shows the release at its foot,
-small and dim ("V0.2.0 ALPHA", then the build id), so you can tell what
+small and dim ("V0.3.3 ALPHA", then the build id), so you can tell what
 you run. It is the same mechanism ESPHome and Home
 Assistant use ([ESP Web Tools](https://esphome.github.io/esp-web-tools/)),
 running entirely in the browser over Web Serial.
@@ -506,12 +609,19 @@ vendored flasher). Any HTTPS static host will do, GitHub Pages included;
 
 ## Run it on real hardware
 
-The target is the Waveshare **ESP32-S3-Touch-AMOLED-1.8** (ESP32-S3R8,
-16 MB flash, 8 MB PSRAM, 368×448 AMOLED, capacitive touch, IMU, PMIC, RTC).
-Both board revisions are supported and auto-detected. Touch targets sit
-10 px below where they are drawn, because fingers land a little low on a
-glass this small; the touch port corrects for it. The browser installer
-above is the no-toolchain path; this is the developer one.
+Three Waveshare boards are supported, all ESP32-S3R8 with 16 MB flash and
+8 MB PSRAM, an AMOLED, capacitive touch, an IMU and a PMIC:
+
+| Board | Glass | Build |
+|---|---|---|
+| **ESP32-S3-Touch-AMOLED-1.8** (V1 and V2, auto-detected) | 368×448, shown as a 448×368 tank | the default |
+| **ESP32-S3-Touch-AMOLED-1.75C**, the pendant | 466 px circle | `sdkconfig.round` |
+| **ESP32-S3-Touch-AMOLED-2.06**, the watch | 410×502, portrait | `sdkconfig.watch` |
+
+Each board's touch panel is calibrated in its touch port, so a tap lands
+where the finger is. [docs/BOARDS.md](docs/BOARDS.md) has what the three
+share and where they differ; each board's own traps are in its doc. The
+browser installer above is the no-toolchain path; this is the developer one.
 
 ```bash
 . ~/esp/esp-idf/export.sh
@@ -520,6 +630,20 @@ idf.py -p /dev/cu.usbmodem* flash
 esptool.py --chip esp32s3 -p /dev/cu.usbmodem* write_flash 0x290000 ../model/out/model_q4.bin
 ```
 
+The other two boards build from the same tree on top of their own fragment,
+each in its own build directory:
+
+```bash
+idf.py -B build-round -DSDKCONFIG=build-round/sdkconfig "-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.round" build
+idf.py -B build-watch -DSDKCONFIG=build-watch/sdkconfig "-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.watch" build
+```
+
+Every build is signed, so the first build needs a key: `tools/ota_key.sh`
+makes one for you in `firmware/keys/` (never committed). A tank you flash
+with your own key takes over-the-air updates only from images signed with
+that key, not from this project's releases; the browser installer is the
+way onto the release channel.
+
 The model lives in its own 8 MB raw partition and only needs flashing once.
 [docs/bringup.md](docs/bringup.md) is the step-by-step checklist with pass
 signals for each stage, and [docs/memory_budget.md](docs/memory_budget.md)
@@ -527,7 +651,7 @@ explains where every kilobyte goes. The boot log prints a per-stage frame
 profile and per-decision inference timings, so performance work is
 measurable without instruments.
 
-**Other boards.** This repo supports one board, to keep the project small
+**Other boards.** This repo supports those three boards, to keep the project small
 while it is young. Two community ports run the tank elsewhere. They are not
 built or tested here, and they may lag behind this repo:
 
@@ -544,70 +668,6 @@ built or tested here, and they may lag behind this repo:
   [their fork](https://github.com/lmoiseichuk/pocket-tank-cyd/tree/feature/cyd_ES3C28P).
   [Pull request #10](https://github.com/mediacutlet/pocket-tank/pull/10) has
   the details.
-
-## Run it on the 2.8" CYD
-
-This fork also runs the tank on the **ES3C28P "cheap yellow display"**: an
-ESP32-S3 with 16 MB flash and 8 MB PSRAM, a 320×240 ILI9341 IPS panel over
-SPI, FT6336 touch and ES8311 audio, with every page laid out for the smaller
-screen. The browser installer is for the AMOLED board only; the CYD is built
-and flashed from this tree with ESP-IDF 5.5 (`IDF_PATH`, or
-`~/.espressif/esp-idf/v5.5`):
-
-```bash
-tools/build_cyd.sh                          # build only
-tools/build_cyd.sh <port> --model           # the first flash: the app and the 8 MB model partition
-tools/build_cyd.sh <port>                   # after that: the app alone
-```
-
-`<port>` is the board's stable path,
-`/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_<MAC>-if00`, never
-a `/dev/ttyACM<n>`, whose numbers shuffle between plug-ins. The script keeps
-its own build directory (`firmware/build_cyd`) and sdkconfig
-(`sdkconfig.defaults` with `sdkconfig.defaults.cyd` on top), so the AMOLED
-build is never touched, and it flashes nothing when the build fails.
-
-**Updating keeps the tank**, as on the AMOLED board: the script writes the
-bootloader, the partition table and the app, and the save in NVS is left
-alone. **To start over from a blank board**, erase it and flash the model
-again:
-
-```bash
-. ~/.espressif/esp-idf/v5.5/export.sh       # esptool.py comes with ESP-IDF
-esptool.py --chip esp32s3 -p <port> erase_flash
-tools/build_cyd.sh <port> --model
-```
-
-### Gestures
-
-The movement gestures need an IMU. The CYD has none on the board: a
-QMI8658 or an MPU-6050 breakout on its I2C socket (VCC 3V3, GND, SDA IO16,
-SCL IO15), detected at boot - which chips, and the wiring pin by pin, in
-[docs/CYD.md](docs/CYD.md), *Supported IMUs, and wiring one*. Turning, holding still and handling
-are the AMOLED board's too; face down is the CYD's.
-
-| gesture | what the tank does |
-|---|---|
-| turn it upside down, about 0.75 s | the picture and touch turn 180 degrees to stay readable; turn it back and they follow |
-| lay it flat, or stand it on its side | nothing - it keeps the way it was, so it never flaps on a table |
-| pick it up, carry it | the sound stays warm, and holding it counts as attention for the tank light |
-| lay it screen down, level and still, 2 s | it saves, darkens and sleeps, as a short press of BOOT |
-| turn it screen up, or pick it up, within 20 minutes | it wakes where it was, fish and all - after any sleep that began face down |
-| short press of BOOT | sleeps the tank; within 20 minutes another press wakes it in place (face down or not), after that it boots |
-| hold BOOT and tap the glass | the *Reset tank?* prompt |
-| double-tap the glass | the tank light on or off (LIGHTS OUT: MANUAL, the default) |
-
-The settings page's FACE DOWN row (SLEEP / IGNORE) switches the face-down
-sleep and its wake off; it takes the place of the SCREEN row once an IMU
-answers. After 20 minutes asleep the board deep-sleeps, and only BOOT wakes
-it - waking on movement then would need the IMU's INT wire.
-
-Back up the factory image before the first flash
-(`esptool.py --chip esp32s3 -p <port> -b 921600 read_flash 0 0x1000000 factory_16MB.bin`)
-and the board goes back to how it arrived with one `write_flash`. In the
-simulator, `make -C sim CYD=1` builds `fishsim-cyd` at the CYD's 320×240.
-[docs/CYD.md](docs/CYD.md) has the board, the pins and everything the port
-changed.
 
 ## Train your own
 
@@ -632,18 +692,20 @@ seven-minute prompt check before an overnight run is always worth it.
   card, milestones page, the shop, the reset prompt and its pixel font),
   `progression.c` (the long game, the sand dollars and persistence),
   `icons.c` (baked pixel art), `audio.c` (the sound mixer), `notice.c` (the
-  milestone and low-battery announcements), `llm/` (4-bit engine, word
+  milestone and low-battery announcements), `update.c` (the update pages
+  and their flow), `llm/` (4-bit engine, word
   tokenizer, the shared encoder)
 - `sim/` — the LVGL + SDL2 simulator, its persistence port, and the self-tests
 - `firmware/` — ESP-IDF app: display, touch, battery, IMU, RTC and audio
-  ports for the Waveshare board, the on-device advisor scheduler, the QEMU
-  harness, and the partition table
+  ports for the three Waveshare boards, the on-device advisor scheduler,
+  update mode and its Wi-Fi port, the QEMU harness, and the partition table
 - `model/` — the frozen [state/goal schema](model/schema.md), trace
   generation, training, evaluation, probes, and the 4-bit export
 - `installer/` — the browser installer page and the vendored ESP Web Tools
   bundle; `tools/make_installer.py` assembles the upload folder
 - `tools/` — the icon baker, the sound bank builder, the installer
-  assembler, and a serial bench client
+  assembler, the release manifest maker, the touch calibration fitter, the
+  three-board picture sheet, and a serial bench client
 - `assets/icons/` — the pixel-art source for the stats card, the badges,
   the shop and the snail
 - `assets/sounds/` — the cues (16 kHz mono) and their levels
@@ -660,10 +722,13 @@ seven-minute prompt check before an overnight run is always worth it.
 - [docs/retrain-v3.md](docs/retrain-v3.md) — the schema v3 retrain runbook
 - [docs/retrain-v4.md](docs/retrain-v4.md) — the schema v4 (boredom) retrain runbook and its numbers
 - [docs/DEVICE.md](docs/DEVICE.md) — what is in flight on the device, and the flash rule
+- [docs/BOARDS.md](docs/BOARDS.md) — the three boards: what is shared, where one may differ, how a release keeps each to its own image
+- [docs/board-amoled-1.75c.md](docs/board-amoled-1.75c.md) — the pendant's bring-up notes
+- [docs/board-amoled-2.06-watch.md](docs/board-amoled-2.06-watch.md) — the watch's bring-up notes
+- [docs/OTA.md](docs/OTA.md) — updates over Wi-Fi: the partition table, update mode, signing, the manifest
 - [docs/AUDIO.md](docs/AUDIO.md) — the sound design: the cues, the asset pipeline, the power rules
 - [docs/memory_budget.md](docs/memory_budget.md) — flash, PSRAM, and SRAM plan
 - [docs/bringup.md](docs/bringup.md) — hardware bring-up checklist
-- [docs/CYD.md](docs/CYD.md) — the 2.8" ESP32-S3 CYD: the board, building, what the port changed, the IMU and its gestures
 
 ## Status
 
@@ -693,17 +758,18 @@ seven-minute prompt check before an overnight run is always worth it.
   an algae-grazing snail and a swim-through castle to start; what you buy you place yourself,
   where along the floor and whether it stands behind, among or in front
   of the fish
-- ✅ Browser installer: one click from Chrome or Edge, hosted at
-  stratobuilds.com; updating is the same click and never erases a tank
+- ✅ Browser installer: one click from Chrome or Edge, at
+  pocketank.com/install, with a board to pick; a cable update is the same click
+  and never erases a tank
 - ✅ v0.2.0 (alpha), the first numbered release: fish that turn like fish,
   the fish's name on its card, a shrimp school that eats what falls and
   multiplies, and a fry's welcome that comes before its badges
-- 🔋 In progress: battery life. The first night on the board's power-off
-  and the awake draw with a full tank are being measured with the tank's
-  own log; what is in flight and how to pick it up is in
-  [docs/DEVICE.md](docs/DEVICE.md)
+- ✅ v0.3 (alpha): two more boards (the round pendant and the watch),
+  updates over Wi-Fi with signed, per-board images, a sea urchin that keeps
+  the grass down, a snail that cleans overnight, a sponge and scissors, and
+  fish you can rename or sell
 - 🚧 Next: more to unlock: new fish species, more plants, corals, and more
-  tank maintenance critters (urchins to keep the grass down)
+  tank maintenance critters
 - 🚧 Next: more achievements and milestones
 
 ## The video series

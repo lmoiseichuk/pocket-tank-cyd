@@ -7,20 +7,20 @@ menu "pocket-tank"
             size (common/tank.h) and which display / touch ports can be used.
         config POCKET_TANK_BOARD_AMOLED18
             bool "Waveshare ESP32-S3-Touch-AMOLED-1.8 (448x368)"
-        config POCKET_TANK_BOARD_CYD28
-            bool "2.8in ESP32-S3 CYD, ES3C28P: ILI9341 + FT6336 (320x240)"
+        config POCKET_TANK_BOARD_CYD_320X240
+            bool "CYD at 320x240: the 2.8in ESP32-S3 ES3C28P, ILI9341 + FT6336"
         config POCKET_TANK_BOARD_TLCD2
             bool "Waveshare ESP32-S3-Touch-LCD-2: ST7789T3 + CST816D (320x240)"
     endchoice
     config POCKET_TANK_TANK_320X240
         bool
-        default y if POCKET_TANK_BOARD_CYD28 || POCKET_TANK_BOARD_TLCD2
+        default y if POCKET_TANK_BOARD_CYD_320X240 || POCKET_TANK_BOARD_TLCD2
         help
             The small landscape boards: common/tank.h lays the tank out at
             320x240, and touch arrives already landscape from the driver.
     config POCKET_TANK_DISPLAY_ILI9341
         bool "Drive the CYD's ILI9341 over SPI, backlight PWM on GPIO45"
-        depends on POCKET_TANK_BOARD_CYD28
+        depends on POCKET_TANK_BOARD_CYD_320X240
         default n
     config POCKET_TANK_DISPLAY_ST7789
         bool "Drive the Touch-LCD-2's ST7789T3 over SPI, backlight PWM"
@@ -31,6 +31,27 @@ menu "pocket-tank"
         default n
         help
             Enable for the real board. Off = stub display port (QEMU / compile-only).
+    config POCKET_TANK_ROUND
+        bool "The ROUND build: a 466 px bowl for the Waveshare ESP32-S3-Touch-AMOLED-1.75C"
+        default n
+        help
+            The tank's world is compiled in: off = the 448x368 rectangle (the
+            1.8 board; on a 1.75C that image still runs, the frame shown inside
+            the circle). On = TANK_ROUND, the bowl that fills the round glass;
+            that image shows nothing on a 1.8. Build it with
+            SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.round" into its
+            own build directory and sdkconfig (docs/board-amoled-1.75c.md).
+    config POCKET_TANK_WATCH
+        bool "The WATCH build: a 410x502 PORTRAIT tank for the Waveshare ESP32-S3-Touch-AMOLED-2.06"
+        default n
+        depends on !POCKET_TANK_ROUND
+        help
+            On = TANK_WATCH: a tall tank the way a watch is worn, with the
+            round corners of its glass; that image shows nothing on the
+            other boards. Off, the 448x368 rectangle image still runs on a
+            watch, on its side and centred in the glass. Build it with
+            SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.watch" into its
+            own build directory and sdkconfig (docs/board-amoled-2.06-watch.md).
     config POCKET_TANK_TOUCH_FT3168
         bool "Read the FT3168 capacitive touch (taps / holds)"
         default n
@@ -73,11 +94,11 @@ menu "pocket-tank"
             which does not enable the gesture.
     config POCKET_TANK_IMU_MPU6050
         bool "Look for an MPU-6050 IMU (I2C 0x68 / 0x69)"
-        default y if POCKET_TANK_BOARD_CYD28
+        default y if POCKET_TANK_BOARD_CYD_320X240
         default n
         help
             The CYD has no IMU of its own; an MPU-6050 breakout on its I2C
-            socket stands in (docs/CYD.md). Probed after the QMI8658, so a
+            socket stands in (CYD.md). Probed after the QMI8658, so a
             board carrying both uses the QMI8658.
     config POCKET_TANK_IMU_MPU6050_UP_AXIS
         int "MPU-6050: the axis along the screen's up (0=X 1=Y 2=Z)"
@@ -117,15 +138,56 @@ menu "pocket-tank"
             way up the picture is. The face-down gesture's builds always
             let the IMU turn the picture.
     config POCKET_TANK_IMU_FACE_DOWN_SLEEP
-        bool "Face down sleeps the tank, face up wakes it (a settings toggle)"
-        default y if POCKET_TANK_BOARD_CYD28
+        bool "Face down sleeps the tank, face up wakes it"
+        default y if POCKET_TANK_BOARD_CYD_320X240
         default n
         depends on POCKET_TANK_IMU_QMI8658 || POCKET_TANK_IMU_MPU6050
         help
             Screen down and still for 2 s is a short press of the sleep key;
-            turned face up within the 20-minute grace, the tank wakes in place.
-            The compact settings page's SCREEN row becomes FACE DOWN SLEEP /
-            IGNORE once an IMU answers (the IMU turns the picture itself).
+            turned face up, the tank wakes in place (in the deepsleep mode,
+            only within its 20-minute grace). What the gesture does follows
+            the sleep mode - on the CYD the settings page's SLEEP row, whose
+            NEVER ignores it as it does every other way into sleep.
+            Once an IMU answers, the compact settings page's SCREEN row is
+            ROTATION (the IMU turns the picture itself).
+    choice POCKET_TANK_SLEEP_MODE
+        prompt "Sleep mode: what the sleep key, face down and the director's sleeps do"
+        default POCKET_TANK_SLEEP_DEEP
+        help
+            Every way into sleep goes through this: BOOT's short press (no
+            PMIC), the PWR key (short and long), the face-down gesture, and
+            the director's deepsleep and poweroff. The modes that go dark
+            (screen, lightsleep) save the tank, turn the backlight and the
+            sound off and stop drawing; a touch or a pick-up or tilt (face
+            up instead, after a face-down sleep), BOOT, the PWR key, or the
+            director's timer lights it again where it was. The touch that
+            wakes it does nothing in the tank. Made for the CYD, whose case
+            covers BOOT, and offered only there: the AMOLED's panel sleep
+            holds its touch controller in reset and cuts the panel's rails,
+            so its dark could not wake on a touch, and cycling those rails
+            beside an awake IMU is what railed its X and Z on 2026-08-31.
+            On the CYD, none, screen and lightsleep are only the factory
+            default: the settings page's SLEEP row (NEVER / SCREEN / LIGHT)
+            changes the mode at run time, and the choice is kept in NVS
+            ("tank"/"sleep"). deepsleep is a build choice only, with no row.
+        config POCKET_TANK_SLEEP_NONE
+            bool "none: never goes dark; every way into sleep is ignored, with a log line"
+        config POCKET_TANK_SLEEP_SCREEN
+            bool "screen: dark, the CPU running"
+            depends on POCKET_TANK_BOARD_CYD_320X240
+        config POCKET_TANK_SLEEP_LIGHT
+            bool "lightsleep: dark, light-sleeping between looks; never deep sleep"
+            depends on POCKET_TANK_BOARD_CYD_320X240
+            help
+                While a USB host is attached the chip stays awake instead,
+                as in screen: light sleep takes the USB port down.
+        config POCKET_TANK_SLEEP_DEEP
+            bool "deepsleep: the 20-minute grace, then deep sleep or the PMIC power-off"
+            help
+                As the tank has always slept: within the grace BOOT, the
+                PWR key or face up wakes it in place; after it only BOOT,
+                the PWR key or the director's timer does, with a boot.
+    endchoice
     config POCKET_TANK_NO_PIE
         bool "Disable the PIE SIMD inference kernel (scalar dot products)"
         default n

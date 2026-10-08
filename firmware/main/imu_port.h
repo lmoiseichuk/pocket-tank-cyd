@@ -27,11 +27,23 @@ bool imu_port_take_face_down(void);
  * down, 0 = not, -1 = no answer (the caller keeps sleeping). */
 int  imu_port_face_down_now(void);
 void imu_port_last(int16_t out[3], int *motion);  /* the last poll's raw sample + its movement (director `imu`) */
+/* the dark (2026-10-08, main.c's enter_dark: screen off, tank task waiting):
+ * picked up or tilted? imu_port_rest_begin forgets the rest pose; each
+ * imu_port_rest_moved is one fresh read (the caller paces them, about five a
+ * second). The board must first lie still for about a second, and that pose
+ * is the rest pose - so a tank darkened in the hand does not wake as it is
+ * put down; after that, once it has left the pose on two reads in a row, it
+ * returns how far (counts, summed over the axes), else 0. Its own state: the
+ * flip, handling and face-down votes are untouched. 0 with no IMU, or no
+ * answer. */
+void imu_port_rest_begin(void);
+int  imu_port_rest_moved(void);
 /* drowse bracket: quiesce the accel before the panel/touch rails cut (a
  * powered chip beside rail transitions is the latch-up recipe that railed
  * X/Z on 2026-08-31 - a full power-off revived them), then soft-reset +
  * reconfigure on wake so it never resumes on trust. */
 void imu_port_sleep(void);
 void imu_port_wake(void);
+void imu_port_power_down(void);   /* deep sleep only: the 2 MHz clock off too (~50 -> ~20 uA); the wake is a reboot */
 
 #endif
