@@ -54,17 +54,15 @@ reset the chip before anyone read the log.
 
 ## The CYD right now (the 2.8" ES3C28P, a separate board)
 
-- **Firmware:** v0.3.3 alpha, build `866b7361227d` - main with PR #2 (the
-  Waveshare Touch-LCD-2, CONFIG_POCKET_TANK_WST_320X240) merged in and the
-  dark made every 320x240 board's; the CYD's code is the same machine code
-  as before it, and main's tip (`0a0cc7c`) differs only in
-  tools/build_cyd.sh. App only, flashed 2026-10-08 with `tools/build_cyd.sh`
-  over the tank saved by v0.3.3. SLEEP is on LIGHT, the build's default -
-  nothing chosen in settings yet - so the CYD goes dark and never
+- **Firmware:** v0.3.4 alpha, build `7d75e273c518` - upstream's v0.3.4 (the
+  square, faster charging) merged into main, with the 320x240 boards as the
+  fifth world. App only, flashed 2026-10-13 with `tools/build_cyd.sh` over the
+  tank saved by v0.3.3, which loaded unchanged. SLEEP is on LIGHT, the build's
+  default - nothing chosen in settings yet - so the CYD goes dark and never
   deep-sleeps ([CYD.md](../CYD.md), *Sleep*). `-O2` throughout, assertions
   on, log level INFO - what upstream ships; no bring-up instrumentation. The
-  model partition is the one flashed 2026-09-29 at the full reset. Its
-  saved data before each flash is in `~/src/dooing/pocket-tank-cyd-backup/`
+  model partition is the one flashed 2026-09-29 at the full reset. Its saved
+  data before each flash is in `~/src/dooing/pocket-tank-cyd-backup/`
   (`nvs_before_*`).
 - **IMU:** an MPU-6050 (GY-521-style) on the I2C socket, SDA IO16 / SCL IO15,
   0x68, **held flat against the back, pins toward the top edge** - not yet
@@ -90,6 +88,9 @@ reset the chip before anyone read the log.
   MPU-6050 up, the tank's save loaded. **Not yet:** LM's look at the glass -
   the picture, touch at the edges, the flip, face down and a touch waking
   the dark.
+- **The v0.3.4 build, 2026-10-13:** a clean boot (0 errors, 25.5 fps), the
+  tank's save loaded, touch and the MPU-6050 up. On the glass (LM): "all
+  works!".
 - **Nothing in flight.** No battery log on this board (no fuel gauge), so no
   preflight; a flash resets nothing that is being measured.
 
