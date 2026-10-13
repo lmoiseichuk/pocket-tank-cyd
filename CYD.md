@@ -159,7 +159,7 @@ taps: the first shows the refund and OK?, the second sells.
 | ROTATION | one padlock button, with LOCKED or UNLOCKED beside it | in SCREEN's place once an IMU answers. Tap the padlock to lock the picture the way up it is now; tap it again to let it follow the board turned over |
 | SLEEP | NEVER / SCREEN / LIGHT | what every way into sleep does, on every 320 x 240 board: NEVER ignores it, SCREEN darkens the glass with the chip awake, LIGHT darkens it and light-sleeps. LIGHT is the factory default; a choice is kept in NVS and applies from the next sleep (*Sleeping and waking*) |
 
-At the foot: the release and the build id, small and dim ("V0.3.3 ALPHA
+At the foot: the release and the build id, small and dim ("V0.3.4 ALPHA
 BUILD ...", cut short of CLOSE), and CLOSE. There is no UPDATES button.
 
 ### Sleeping and waking
@@ -972,9 +972,19 @@ upstream's text but for one block.
    tree's own `git describe`; any other page that differs is the fork
    reaching an upstream board.
 
-5. **The five firmware images build:** `tools/build_cyd.sh` with no port,
-   and the 1.8, the round board, the watch and the square with `idf.py`, each into its
-   own build directory as README.md's
+   Run the snapshots **one at a time**, each with `POCKET_TANK_SAVE`
+   pointing at a scratch file. `--snapshot` keeps its Wi-Fi network in one
+   fixed file, `/tmp/pocket-tank-snapshot-wifi.txt`, so two run side by side
+   overwrite each other's and the update pages (`update_uptodate`,
+   `update_wrong_board`, `update_one_action`) change from run to run, even
+   in upstream's own tree (v0.3.4's sync). And without `POCKET_TANK_SAVE`
+   each run writes the sim's own save, `~/.cache/pocket-tank/tank.sav`.
+
+5. **The six firmware images build:** `tools/build_cyd.sh` with no port;
+   the Touch-LCD-2 with `idf.py` into `build_wst`, as
+   *The Waveshare ESP32-S3-Touch-LCD-2* shows;
+   and the 1.8, the round board, the watch and the square with `idf.py`, each
+   into its own build directory as README.md's
    [*Run it on real hardware*](README.md#run-it-on-real-hardware) shows.
 
 6. **Back up the CYD's NVS - the tank's save - before flashing it:**
