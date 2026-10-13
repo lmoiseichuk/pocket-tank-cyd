@@ -7,7 +7,7 @@ yellow display" as well: the ES3C28P from QDtech, an ESP32-S3 behind a
 everything here uses it as it comes. The vendor's specification:
 [ES3C28P_ES2N28P_Specification_V1.0.pdf](https://www.lcdwiki.com/res/ES3C28P/ES3C28P_ES2N28P_Specification_V1.0.pdf).
 
-Upstream's three Waveshare boards build from this tree as before, and
+Upstream's four Waveshare boards build from this tree as before, and
 [README.md](README.md) is upstream's own, with one block at its top that
 points here. This page is the CYD owner's: what the fork changes, how the
 tank is used on the CYD's glass, how to build and flash it, the board and
@@ -20,7 +20,7 @@ flash it first (*Building and flashing*), then *Using it*.
 
 Against upstream's main (`git log upstream/main..main`):
 
-- **A fourth board.** `CONFIG_POCKET_TANK_CYD_320X240` builds a
+- **A fifth board.** `CONFIG_POCKET_TANK_CYD_320X240` builds a
   320 x 240 tank for the ES3C28P: an ILI9341 display port over SPI, the
   FT6336 touch, the ES8311 on the CYD's own pins. It is built and flashed by
   cable with `tools/build_cyd.sh` (*Building and flashing*).
@@ -45,9 +45,9 @@ Against upstream's main (`git log upstream/main..main`):
 - **Two rules scaled to the smaller tank, on the 320 x 240 boards only.**
   The model's distance bands scale with the tank's width, and the algae
   films the glass at the 1.8's pace per cell (*What the port changes*).
-- **The simulator's fourth world.** `make -C sim 320X240=1` builds
+- **The simulator's fifth world.** `make -C sim 320X240=1` builds
   `fishsim-320x240`, and `make -C sim check-all` runs the selftests in
-  all four worlds.
+  all five worlds.
 - **A second 320 x 240 board.** `CONFIG_POCKET_TANK_WST_320X240` builds the
   same tank for the Waveshare ESP32-S3-Touch-LCD-2, contributed by adampog
   (*The Waveshare ESP32-S3-Touch-LCD-2*). Both boards select
@@ -928,6 +928,12 @@ upstream's text but for one block.
    - `docs/DEVICE.md` - upstream's bench log, with a fork section, *The CYD
      right now*, and a CYD note in its first rule. It conflicts where
      upstream edits beside them.
+   - A board world upstream adds (v0.3.4's square, `TANK_SQUARE`) meets the
+     320 x 240 in every list that names the boards: `common/tank.h`'s
+     size, `common/render.h`'s corner chains, `common/version.h`'s
+     `PT_BOARD`, tankcore's `CMakeLists.txt`, `map_touch` and
+     `touch_port_init` in `touch_port_ft3168.c`, and `sim/Makefile`'s
+     worlds and `check-all`. Both stay, each in a branch of its own.
    - Smaller blocks that can meet an upstream edit:
      `firmware/main/CMakeLists.txt` and `Kconfig.projbuild` (the board, the
      IMUs, the sleep modes), `board_pins.h`, `audio_port_es8311.c`,
@@ -946,24 +952,28 @@ upstream's text but for one block.
    - a new page measurement upstream writes as a literal, not `UI(n)`,
      draws at full size on the CYD's 240 px page;
    - a rule upstream adds that is keyed on the tank's size needs a look at
-     320 x 240.
+     320 x 240;
+   - an `#if` upstream puts around a function the fork has split into two
+     branches can lose its `#endif` to the fork's: v0.3.4's `#if !TANK_WORN`
+     around `set_lock_icon` in `common/render.c` merged unterminated, and
+     the simulator would not build.
 
-3. **The simulator, in all four worlds:**
+3. **The simulator, in all five worlds:**
 
    ```sh
-   make -C sim check-all          # the 1.8, the round board, the watch, then the CYD
+   make -C sim check-all          # the 1.8, the round board, the watch, the square, then the 320 x 240
    ```
 
-4. **Upstream's three worlds against upstream's own tree.** Build upstream's
+4. **Upstream's four worlds against upstream's own tree.** Build upstream's
    simulator in a worktree of `upstream/main` (it needs its own `sim/lvgl`),
    write each world's pages with `--snapshot <prefix>` from `fishsim`,
-   `fishsim-round` and `fishsim-watch` in both trees, and compare them with
+   `fishsim-round`, `fishsim-watch` and `fishsim-square` in both trees, and compare them with
    `cmp`. The only difference expected is the build line, which prints the
    tree's own `git describe`; any other page that differs is the fork
    reaching an upstream board.
 
-5. **The four firmware images build:** `tools/build_cyd.sh` with no port,
-   and the 1.8, the round board and the watch with `idf.py`, each into its
+5. **The five firmware images build:** `tools/build_cyd.sh` with no port,
+   and the 1.8, the round board, the watch and the square with `idf.py`, each into its
    own build directory as README.md's
    [*Run it on real hardware*](README.md#run-it-on-real-hardware) shows.
 
