@@ -36,6 +36,16 @@
  * component, and the sim's make 320X240=1 defines it. A plain rectangle (CYD.md) */
 #define TANK_W 320
 #define TANK_H 240
+/* (this fork) Upstream's ROUND, WATCH and SQUARE builds are their own Kconfig
+ * switches, outside the board choice, so menuconfig lets one be ticked on a
+ * 320 x 240 board too. Each also defines TANK_W and TANK_H: the preprocessor
+ * would only warn about the second definition, and the build would go on as
+ * a 320 x 240 board running another board's world (its bed, its corners, its
+ * walls). Stop the build instead. The check sits in the fork's own block so
+ * upstream's Kconfig and its size blocks stay exactly as upstream ships them. */
+#if defined(TANK_ROUND) || defined(TANK_WATCH) || defined(TANK_SQUARE)
+#error "a 320 x 240 board with the ROUND, WATCH or SQUARE build ticked: untick it (CONFIG_POCKET_TANK_ROUND / _WATCH / _SQUARE)"
+#endif
 #endif
 #ifdef TANK_SQUARE              /* the square (Waveshare 2.16, 2026-10-12): a 480 x 480 glass in a desk box, USB at its foot -
                                  * the rectangle's world 32 px wider and 112 px taller, the pages centred in it */
