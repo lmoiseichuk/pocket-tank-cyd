@@ -116,6 +116,9 @@ void render_stats_card(const tank_t *t, int fish_idx, uint16_t *fb, int stride);
  * left, the traits and MORE down the right - and the toolbox fits under it (164..234) */
 #define RENDER_CARD_X 6
 #define RENDER_CARD_Y 6
+#elif defined(TANK_SQUARE)      /* the square: its bezel's corner clipped the card at the 1.8's 14 / 8 (Strato, 2026-10-12) */
+#define RENDER_CARD_X 26
+#define RENDER_CARD_Y 22
 #else
 #define RENDER_CARD_X 14
 #define RENDER_CARD_Y 8
@@ -178,6 +181,9 @@ bool render_tool_chip_hit(const tank_t *t, float x, float y);
 #define RENDER_BAT_Y 16
 #elif defined(TANK_WATCH)       /* the watch: the top right, in from its round corner */
 #define RENDER_BAT_X (TANK_W - RENDER_BAT_W - 56)
+#define RENDER_BAT_Y 22
+#elif defined(TANK_SQUARE)      /* the square: in from its bezel's corner, like the card */
+#define RENDER_BAT_X (TANK_W - RENDER_BAT_W - 44)
 #define RENDER_BAT_Y 22
 #else
 #define RENDER_BAT_X (TANK_W - RENDER_BAT_W - 28)     /* clear of the curved bezel; the bolt sits left of it */
@@ -427,7 +433,7 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
 #define MSP_SET_X     ((PAGE_W - MSP_SET_W) / 2)
 #define MSP_SET_Y     (-PAGE_Y + 18)    /* SETTINGS: top dead centre */
 #define SHP_CLOSE_X   259               /* the shop: HOW TO EARN 97..247 beside CLOSE */
-#define SET_CLOSE_X   296               /* settings: UPDATES and CLOSE drawn in from the glass, the seconds' chevron between them */
+#define SET_CLOSE_X   296               /* settings: UPDATES and CLOSE drawn in from the glass */
 #else
 #define MSP_CLOSE_X   324               /* the CLOSE button, bottom right, inside the bezel curve; clear of the brightness row's number */
 #define MSP_CLOSE_Y   312

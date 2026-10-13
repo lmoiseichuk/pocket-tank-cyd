@@ -16,6 +16,7 @@ SDL_LIBS   := $(shell sdl2-config --libs)
 # `make ROUND=1`: the round 466 px bowl (the Waveshare 1.75C's world) as
 # ./fishsim-round, built beside the rectangle's in build-round/.
 # `make WATCH=1`: the watch's 410 x 502 portrait tank (the Waveshare 2.06) as ./fishsim-watch
+# `make SQUARE=1`: the square's 480 x 480 tank (the Waveshare 2.16) as ./fishsim-square
 # `make 320X240=1` (this fork): the 320 x 240 tank every 320 x 240 board shares -
 # the CYD, the Touch-LCD-2 (CYD.md) - as ./fishsim-320x240. It defines the
 # firmware's own CONFIG_POCKET_TANK_320X240, so common/ tests one symbol.
@@ -27,6 +28,10 @@ else ifdef WATCH
 BUILD   := build-watch
 OUT     := fishsim-watch
 ROUNDF  := -DTANK_WATCH
+else ifdef SQUARE
+BUILD   := build-square
+OUT     := fishsim-square
+ROUNDF  := -DTANK_SQUARE
 else ifdef 320X240
 BUILD   := build-320x240
 OUT     := fishsim-320x240
@@ -58,10 +63,10 @@ ifdef NOMODEL
 SELFTESTS := $(filter-out --selftest-llm,$(SELFTESTS))
 endif
 
-# `make check` tests the rectangle; `make ROUND=1 check` / `make WATCH=1 check`
-# the same selftests in that board's world; `make check-all` all three - the
-# gate for anything in common/ (docs/BOARDS.md) - and, in this fork, the
-# 320 x 240 boards' (`make 320X240=1 check`) as the fourth
+# `make check` tests the rectangle; `make ROUND=1 check` / `make WATCH=1 check` /
+# `make SQUARE=1 check` the same selftests in that board's world; `make check-all`
+# all four - the gate for anything in common/ (docs/BOARDS.md) - and, in this
+# fork, the 320 x 240 boards' (`make 320X240=1 check`) as the fifth
 check: $(OUT)
 	@set -e; for test in $(SELFTESTS); do echo "RUN $(OUT) $$test"; ./$(OUT) "$$test"; done
 
@@ -69,6 +74,7 @@ check-all:
 	$(MAKE) check
 	$(MAKE) ROUND=1 check
 	$(MAKE) WATCH=1 check
+	$(MAKE) SQUARE=1 check
 	$(MAKE) 320X240=1 check
 
 check-nomodel:
@@ -87,7 +93,7 @@ $(BUILD)/%.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -rf build build-round build-watch build-320x240 fishsim fishsim-round fishsim-watch fishsim-320x240
+	rm -rf build build-round build-watch build-square build-320x240 fishsim fishsim-round fishsim-watch fishsim-square fishsim-320x240
 
 -include $(OBJS:.o=.d)
 

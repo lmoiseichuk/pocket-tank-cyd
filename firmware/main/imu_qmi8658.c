@@ -5,7 +5,7 @@
  * waiting for. */
 #include "sdkconfig.h"
 #include "imu_chip.h"
-#include "display_port.h"      /* board_is_round, board_is_watch */
+#include "display_port.h"      /* board_is_round, board_is_watch, board_is_square */
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -128,6 +128,9 @@ const struct imu_chip *imu_qmi8658_probe(i2c_master_bus_handle_t bus) {
     /* the round 1.75C (2026-10-01, held upright, USB down): +X ~16.8k; the watch (2026-10-02) the same -
        its panel's long axis is X, its foot +X (nothing reads it worn: the way up is settings SCREEN) */
     if (board_is_round() || board_is_watch()) { s_chip.up_axis = 0; s_chip.up_sign = 1; }
+    /* the square, 2026-10-12 (Strato holding it his usual way, the USB at the foot, tilted back): g = [1166 13033 10739] -
+       gravity runs +Y in that grip: up = +Y (the 1.8's is -Y) */
+    else if (board_is_square()) { s_chip.up_axis = 1; s_chip.up_sign = 1; }
     ESP_LOGI(TAG, "QMI8658 up at 0x%02x: orientation axis %c%c, out of the glass %c", addr,
              s_chip.up_sign > 0 ? '+' : '-', "XYZ"[s_chip.up_axis], "XYZ"[OUT_AXIS]);
     return &s_chip;

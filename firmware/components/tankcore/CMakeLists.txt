@@ -37,3 +37,6 @@ endif()
 if(CONFIG_POCKET_TANK_WST_320X240)
     target_compile_definitions(${COMPONENT_LIB} PUBLIC CONFIG_POCKET_TANK_WST_320X240=1)
 endif()
+if(CONFIG_POCKET_TANK_SQUARE)  # the square's 480 x 480 tank
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC TANK_SQUARE)
+endif()

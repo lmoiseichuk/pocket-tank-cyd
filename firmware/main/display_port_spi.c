@@ -188,11 +188,14 @@ void display_port_flush(const uint16_t *fb) {
 
 /* ---- the board questions upstream's ports ask (display_port.h, v0.3.0) ----
  * Neither SPI board is one of upstream's AMOLED boards: no round glass, no
- * watch, no IO expander, no PWR key sense line, no panel deep standby or
- * QSPI bus to hold, and the frame IS the panel - so each answer is the plain
- * one, on the CYD and the Touch-LCD-2 alike. */
+ * watch, no square, no IO expander, no PWR key sense line, no panel deep
+ * standby or QSPI bus to hold, and the frame IS the panel - so each answer is
+ * the plain one, on the CYD and the Touch-LCD-2 alike. */
 bool board_is_round(void) { return false; }
 bool board_is_watch(void) { return false; }
+bool board_is_square(void) { return false; }     /* (v0.3.4) not the 2.16 square either */
+void display_port_set_madctl(uint8_t v) { (void)v; }   /* the square's orientation register; the director asks board_is_square first */
+uint8_t display_port_madctl(void) { return 0; }
 bool board_has_expander(void) { return false; }
 int  board_pwr_sense_pin(void) { return -1; }
 void display_port_deep_sleep_pins(bool tp_awake_high) { (void)tp_awake_high; }

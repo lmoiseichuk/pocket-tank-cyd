@@ -20,8 +20,8 @@
 
 #define PT_RELEASE_MAJOR 0
 #define PT_RELEASE_MINOR 3
-#define PT_RELEASE_PATCH 3
-#define PT_RELEASE       "0.3.3"
+#define PT_RELEASE_PATCH 4
+#define PT_RELEASE       "0.3.4"
 #define PT_RELEASE_STAGE "alpha"               /* pre-1.0: shown beside the number */
 #define PT_RELEASE_NUM   ((PT_RELEASE_MAJOR << 16) | (PT_RELEASE_MINOR << 8) | PT_RELEASE_PATCH)
 
@@ -56,6 +56,9 @@
 /* (this fork) the CYD, and the sim's 320 x 240 world, which names no board */
 #define PT_BOARD         "cyd_320x240"
 #define PT_BOARD_NAME    "ES3C28P"
+#elif defined(TANK_SQUARE)
+#define PT_BOARD         "square216"
+#define PT_BOARD_NAME    "ESP32-S3-Touch-AMOLED-2.16"
 #else
 #define PT_BOARD         "amoled18"
 #define PT_BOARD_NAME    "ESP32-S3-Touch-AMOLED-1.8"

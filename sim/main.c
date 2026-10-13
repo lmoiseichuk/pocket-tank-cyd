@@ -293,13 +293,10 @@ static int selftest_spawn(void) {
     if (t_born < 0) { printf("FAIL: no fry within 2 min of the staging\n"); return 1; }
     if (t_spawn < SPAWN_WAIT_MIN_S - DT || t_spawn > SPAWN_WAIT_MAX_S + DT) { printf("FAIL: the courtship started at %.1f s, not %.0f..%.0f\n", t_spawn, SPAWN_WAIT_MIN_S, SPAWN_WAIT_MAX_S); return 1; }
     if (t_in < 0 || t_in > 30) { printf("FAIL: the pair was not courting in the grass within 30 s (%.1f)\n", t_in); return 1; }
-#ifdef CONFIG_POCKET_TANK_320X240
-    const float dance_slack = 1.5f * DT;          /* (this fork) a frame for the sighting, and half a frame for the float times: on
-                                                     the CYD the fry lands 599 frames in, which i * DT puts one ulp under 599 * DT */
-#else
-    const float dance_slack = DT;
-#endif
-    if (t_born - t_in < SPAWN_DANCE_S - dance_slack) { printf("FAIL: the fry came %.1f s into the dance, before SPAWN_DANCE_S\n", t_born - t_in); return 1; }
+    /* (a slack of 1.5 ticks, not 1: the dance is 599 ticks from the first counted one, and the two
+       times are i * DT in floats - at 148 of the 1800 start ticks between 10 and 40 s a correct dance
+       read 9.9833317 against 9.9833336. The square's pair reaches the grass on one of them, tick 1321) */
+    if (t_born - t_in < SPAWN_DANCE_S - 1.5f * DT) { printf("FAIL: the fry came %.1f s into the dance, before SPAWN_DANCE_S\n", t_born - t_in); return 1; }
     {
         const fish_t *f = &tank.fish[tank.n_fish - 1];
         int b = tank_nursery_bed(&tank); float x0, x1; tank_veg_bed(&tank, b, &x0, &x1, NULL, NULL);
@@ -3246,6 +3243,8 @@ static int selftest_shop(void) {
         tank_veg_set(&tank, 3, 0.70f);                        /* the sword plant tall: not its food */
         tank.veg_h[1][tf] = 0.80f; tank_veg_sync(&tank);
         float tf0, sword0 = tank.veg_h[3][1]; tank_veg_frond(&tank, 1, tf, &tf0);
+        tank.urchin_x = tf0 - 143;                            /* the 1.8's walk to it, on every board: its appetite grows with the walk,
+                                                                 and a floor twice as long (the square) would make the bite a bigger one */
         int trims0 = tank.trims; float tpx0 = tank.trim_px, ux0 = tank.urchin_x;
         tank.urchin_appetite = 0.05f; tank.urchin_rest = 0;
         SHOP_TICK(60 * 300);
@@ -4429,7 +4428,7 @@ int main(int argc, char **argv) {
                                        tank_decor_z(&tank, place) == DECOR_Z_BACK ? "BEHIND" : tank_decor_z(&tank, place) == DECOR_Z_FRONT ? "IN FRONT" : "AMONG");
                 else { printf(birth ? "birth flow done: %s named and saved\n" : "setup done\n", who >= 0 ? tank.fish[who].name : "?"); print_roster(&tank); }
             }
-        } else if (settings_view && !confirm_view) {             /* the settings page: segments, the seconds wheel, CLOSE */
+        } else if (settings_view && !confirm_view) {             /* the settings page: segments, LIGHTS OUT's arrows, CLOSE */
             int v = 0, r = render_settings_touch(&tank, (float)mx, (float)my, mpress, &v);
             if (r == SET_TAP_CLOSE) { settings_view = false; milestones_view = true; ms_back = true; }   /* back to the milestones page */
             else if (r == SET_TAP_UPDATES) { settings_view = false; updates_view = true; ms_back = true; printf("updates page\n"); }
