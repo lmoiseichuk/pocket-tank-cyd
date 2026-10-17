@@ -4595,7 +4595,12 @@ static void shop_fry_modal(ctx_t *c, const tank_t *t, uint16_t *fb, int stride) 
     fry_offer_t pk; progression_fry_offer(g_shp_fry_pick, &pk);
     bool go = room && can && !pk.sold && progression_fry_left() > 0;
     char line[32]; snprintf(line, sizeof line, "%d", SD_PRICE_FRY);
-    price_tag(c, X + (W - (16 + UI(4)) - text_w(line, UI_TEXT(2))) / 2, Y + UI(138), SD_PRICE_FRY, go ? 0xffffff : MSP_DIM);   /* (price_tag's coin and gap) */
+#ifdef CONFIG_POCKET_TANK_320X240
+    const int py = Y + UI(134);   /* (this fork) the 16 px coin is not scaled: at UI(138) it sat on the line UI(160), 14 px below */
+#else
+    const int py = Y + UI(138);
+#endif
+    price_tag(c, X + (W - (16 + UI(4)) - text_w(line, UI_TEXT(2))) / 2, py, SD_PRICE_FRY, go ? 0xffffff : MSP_DIM);   /* (price_tag's coin and gap) */
     if (!room) snprintf(line, sizeof line, t->n_fish >= POP_CAP ? "THE TANK IS FULL" : "WELCOME THE NEW FRY");
     else if (!can) snprintf(line, sizeof line, "YOU HAVE %d", (int)t->sd_balance);
     else line[0] = 0;
