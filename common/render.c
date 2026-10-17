@@ -4562,7 +4562,7 @@ static void shop_fry_row(ctx_t *c, const tank_t *t, uint16_t *fb, int stride, in
     int k = fry_first_left();
     bool room = progression_fry_room(t), can = t->sd_balance >= SD_PRICE_FRY;
     const int by = top + SHP_BTN_DY;                         /* (this fork) the item rows' columns and button (render.h): the literals elsewhere */
-    if (k >= 0) { fry_offer_t o; progression_fry_offer(k, &o); fry_draw(fb, stride, SHP_ROW_X + SHP_ROW_ICON / 2, top + SHP_ROW_ICON / 2, 0.9f, &o, t->clock); }
+    if (k >= 0) { fry_offer_t o; progression_fry_offer(k, &o); fry_draw(fb, stride, SHP_ROW_X + SHP_ROW_ICON / 2, top + SHP_ROW_ICON / 2, 0.9f * UI_F, &o, t->clock); }
     draw_text(c, SHP_TEXT_X, top + UI(2), UI_TEXT(2), 0xffffff, "FRY");
     if (k < 0) { char l[24]; fry_hours(l, sizeof l); draw_text(c, SHP_TEXT_X, top + UI(20), UI_TEXT(2), MSP_DIM, l); }
     else price_tag(c, SHP_TEXT_X, top + UI(20), SD_PRICE_FRY, can && room ? MSP_TEAL : MSP_DIM);
