@@ -100,6 +100,10 @@ void render_fb_primed(const uint16_t *fb, unsigned epoch);
  * it has eaten (cm) and what it is up to (chewing / off to the tall grass /
  * resting). */
 #define RENDER_CARD_URCHIN 97
+/* fish_idx == RENDER_CARD_SEAHORSE (0.3.6): the seahorse's card - a ring on
+ * it and a centred card: the seahorse at 2x, its days with the keeper, its
+ * hitches, the trust it passed on and what it is doing. */
+#define RENDER_CARD_SEAHORSE 96
 void render_stats_card(const tank_t *t, int fish_idx, uint16_t *fb, int stride);
 /* Optional card cache (RENDER_CARD_W x RENDER_CARD_H uint16): with the scene
  * cache live, the card is redrawn at most 4x/s and blitted otherwise (~7 ms
@@ -159,10 +163,22 @@ void render_set_card_cache(uint16_t *buf);
 _Static_assert(RENDER_CARD_Y + RENDER_CARD_H <= TANK_H && RENDER_CARD_X + RENDER_CARD_W <= TANK_W &&
                RENDER_TOOLS_Y + RENDER_TOOLS_H <= TANK_H, "the stats card and the toolbox must fit inside the tank");
 int  render_tools_hit(float x, float y);
+/* the LOCK (0.3.5): a small box of its own just right of the toolbox, the
+ * padlock open (bare fingers wipe and cut, as before) or shut (only the
+ * tools do: tank_lock_tools). Shut is lit like a tool in hand - a white
+ * double edge on a lighter fill - and the shackle's shape says it too,
+ * never the hue alone. render_lock_hit is its tap test while a fish's card
+ * is up: its column, from the toolbox's top edge down to the bezel. */
+#define RENDER_LOCK_X (RENDER_TOOLS_X + RENDER_TOOLS_W + RENDER_CARD_HIT_SIDE)
+#define RENDER_LOCK_W 44
+#define RENDER_LOCK_H 44
+#define RENDER_LOCK_Y (RENDER_TOOLS_Y + (RENDER_TOOLS_H - RENDER_LOCK_H) / 2)
+bool render_lock_hit(float x, float y);
 /* With a tool in hand and no fish card up, a chip at the top left says so:
  * the tool and DONE. A tap on it (render_tool_chip_hit) puts the tool back
- * in the box. render_tool_chip draws nothing with TOOL_HAND, or when
- * fish_idx is a fish (its card shows the box instead). */
+ * in the box. render_tool_chip draws nothing with TOOL_HAND, when
+ * fish_idx is a fish (its card shows the box instead), or while a stroke is
+ * on the glass (0.3.5: the film under it shows as it is wiped). */
 void render_tool_chip(const tank_t *t, int fish_idx, uint16_t *fb, int stride);
 bool render_tool_chip_hit(const tank_t *t, float x, float y);
 
@@ -266,7 +282,15 @@ void render_milestones_leave(void);
  * to the milestones page, 2026-09-16),
  * SHOP_TAP_KEPT when a modal opened or closed. Page state is render-local;
  * render_shop_leave clears it when the page closes. */
-enum { SHOP_TAP_NONE = 0, SHOP_TAP_KEPT = 1, SHOP_TAP_CLOSE = 2, SHOP_TAP_BUY = 16, SHOP_TAP_MOVE = 32, SHOP_TAP_SELL = 64 };   /* BUY / MOVE / SELL + item index */
+enum { SHOP_TAP_NONE = 0, SHOP_TAP_KEPT = 1, SHOP_TAP_CLOSE = 2, SHOP_TAP_BUY = 16, SHOP_TAP_MOVE = 32, SHOP_TAP_SELL = 64,
+       SHOP_TAP_FRY = 128 };   /* BUY / MOVE / SELL + item index; FRY + the fry's place in the offer (0.3.5) */
+/* THE FRY (0.3.5, progression_fry_*): once a fish has been sold the shop's
+ * first row is FRY - the first fry still for sale at its left, the price,
+ * CHOOSE (SOLD OUT with all three bought, FULL with no slot). Its modal
+ * shows the three side by side, a bought one a blank; a tap picks one (lit:
+ * a white double edge), BUY returns SHOP_TAP_FRY + its place. Under them the
+ * price, why BUY is dim (no room, too few dollars) and when a fresh three
+ * comes. */
 /* SHOP_TAP_SELL (2026-09-24): an owned placeable piece's modal has SELL next
  * to MOVE; the first tap arms it ("+30 OK?"), the second returns SELL + item
  * and the platform calls progression_sell. Test SELL before MOVE before BUY. */
@@ -282,6 +306,11 @@ int  render_cluster_cells(float growth); /* the reef cluster's, likewise */
  * block the platform provides - PSRAM on the board (internal RAM is spoken
  * for); the sim leaves it unset and render calloc's it */
 size_t render_decor_scratch_size(void);
+/* the pumpkin lantern (0.3.6, SD_ITEM_PUMPKIN): its sprite's pixels, and
+ * in *glow the ones redrawn every frame (the face + the flame) */
+int    render_pumpkin_px(int *glow);   /* its pixels; *glow = the ones redrawn every frame */
+void   render_set_pumpkin_hidden(bool hidden);   /* the frame-rate A/B (director `pumpkin off`): not drawn, no light */
+bool   render_pumpkin_hidden(void);
 void   render_set_decor_scratch(void *buf);
 /* the sand dollar toast: dollars awarded during play (progression_sd_take_award)
  * show as a small pill top centre of the live tank, "+N" beside the coin,
@@ -402,6 +431,8 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
 #define SHRIMP_CARD_H UI(190)
 #define URCHIN_CARD_W UI(336)
 #define URCHIN_CARD_H UI(194)
+#define SEAHORSE_CARD_W UI(336)
+#define SEAHORSE_CARD_H UI(188)
 /* the milestones page (the bowl has its own rows and buttons: render.c) */
 #ifdef TANK_ROUND
 #define MSP_ROW_Y0    56
@@ -497,12 +528,17 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
 #define SHP_MODAL_H   244
 #define SHP_EARN_MODAL_Y 40
 /* the caption under the rows sits SHP_BTN_H + 12 under the last row (the third row, the castle, 2026-09-16: it used to be fixed at 224 / 244 and the castle's row ran into it) */
-#define SHP_EARN_MODAL_H 224
+#define SHP_EARN_MODAL_H 248        /* seven lines since the seahorse's snack (0.3.6) */
 #define SHP_TWO_GAP 16               /* MOVE and SELL side by side in the modal */
 #define SHP_TWO_X0  (SHP_MODAL_X + (SHP_MODAL_W - 2 * MSP_HOW_W - SHP_TWO_GAP) / 2)
 #define SHP_TWO_X1  (SHP_TWO_X0 + MSP_HOW_W + SHP_TWO_GAP)
 #define SHP_PER_PAGE 4
-#define SHP_PAGES    ((SD_ITEM_COUNT + SHP_PER_PAGE - 1) / SHP_PER_PAGE)
+#define SHP_PAGES    ((SD_ITEM_COUNT + SHP_PER_PAGE - 1) / SHP_PER_PAGE)   /* without the FRY row (render.c: shp_pages) */
+#define SHP_FRY_BOX_W  100            /* the fry modal's three boxes */
+#define SHP_FRY_BOX_H  84
+#define SHP_FRY_BOX_GAP 10
+#define SHP_FRY_BOX_X(k) (SHP_MODAL_X + (SHP_MODAL_W - 3 * SHP_FRY_BOX_W - 2 * SHP_FRY_BOX_GAP) / 2 + (k) * (SHP_FRY_BOX_W + SHP_FRY_BOX_GAP))
+#define SHP_FRY_BOX_Y  (SHP_MODAL_Y + 44)
 #define SHP_ARROW_W  36
 #define SHP_ARROW_H  32
 #define SHP_ARROW_Y  (SHP_COIN_Y + 16)
@@ -701,9 +737,19 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
 #undef  SHP_EARN_MODAL_Y
 #define SHP_EARN_MODAL_Y UI(40)
 #undef  SHP_EARN_MODAL_H
-#define SHP_EARN_MODAL_H UI(224)
+#define SHP_EARN_MODAL_H UI(248)     /* seven lines since the seahorse's snack (v0.3.6) */
 #undef  SHP_TWO_GAP
 #define SHP_TWO_GAP   UI(16)
+/* the fry modal's three boxes (v0.3.6's sync): upstream's 3 x 100 + 2 x 10 is
+   wider than the CYD's UI(352) modal; scaled with it, as the modal's lines */
+#undef  SHP_FRY_BOX_W
+#define SHP_FRY_BOX_W UI(100)
+#undef  SHP_FRY_BOX_H
+#define SHP_FRY_BOX_H UI(84)
+#undef  SHP_FRY_BOX_GAP
+#define SHP_FRY_BOX_GAP UI(10)
+#undef  SHP_FRY_BOX_Y
+#define SHP_FRY_BOX_Y (SHP_MODAL_Y + UI(44))
 #undef  SHP_ARROW_W
 #define SHP_ARROW_W   30             /* UI(36) is 23: a finger's minimum instead */
 #undef  SHP_ARROW_H

@@ -121,6 +121,8 @@ enum { SETUP_PG_RENAME = SETUP_PG_PLACE + 1 };
 #define SETUP_HIT_NEXT  1
 #define SETUP_HIT_BACK  2
 #define SETUP_HIT_SELL  5                /* the placement page's SELL (top left): once arms it, twice sells the piece */
+#define SETUP_HIT_BCK   6                /* the placement page's order arrows (2026-10-17): one step back in the stack ... */
+#define SETUP_HIT_FWD   7                /* ... and one step forward (tank_decor_shift) */
 #define SETUP_HIT_UP    3                /* the active slot's letter: next (A -> B) */
 #define SETUP_HIT_DOWN  4                /* ... previous */
 #define SETUP_HIT_SLOT0 10               /* + 0..FISH_NAME_MAX-1: pick that slot */
@@ -150,6 +152,9 @@ enum { SETUP_PG_RENAME = SETUP_PG_PLACE + 1 };
 #define SETUP_TOP_BTN_Y (SETUP_Y + UI(24))
 #define SETUP_TOP_BACK_X (SETUP_X + UI(12))
 #define SETUP_TOP_NEXT_X (SETUP_X + SETUP_W - UI(12) - SETUP_TOP_BTN_W)
+#define SETUP_ORD_W      UI(36)                             /* the order arrows, between SELL and DONE (the placement page) */
+#define SETUP_ORD_X0     (PAGE_W / 2 - SETUP_ORD_W - UI(8))
+#define SETUP_ORD_X1     (PAGE_W / 2 + UI(8))
 /* the letter wheel: FISH_NAME_MAX slots of a 6x font (30 x 42 px glyphs) at
  * a 44 px pitch across the middle of the tank, chevrons 40 px above and
  * below the active one; a press in the row band picks the nearest slot, the

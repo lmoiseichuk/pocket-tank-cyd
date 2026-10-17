@@ -192,6 +192,7 @@ void display_port_flush(const uint16_t *fb) {
  * standby or QSPI bus to hold, and the frame IS the panel - so each answer is
  * the plain one, on the CYD and the Touch-LCD-2 alike. */
 bool board_is_round(void) { return false; }
+bool board_is_175(void) { return false; }        /* (v0.3.6) not the plain 1.75 / 1.75-B; battery_port_axp2101.c asks it on every board */
 bool board_is_watch(void) { return false; }
 bool board_is_square(void) { return false; }     /* (v0.3.4) not the 2.16 square either */
 void display_port_set_madctl(uint8_t v) { (void)v; }   /* the square's orientation register; the director asks board_is_square first */

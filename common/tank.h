@@ -268,7 +268,10 @@ enum {
     TMS_FIRST_TRIM = 1u << 9, TMS_FIRST_CLEANING = 1u << 10,
     TMS_FULL_SCHOOL = 1u << 11,                              /* the shrimp school reached SHRIMP_MAX (2026-09-30) */
     TMS_FIRST_REEF = 1u << 12,                               /* a fish went to look at the reef cluster (2026-10-02) */
-    TMS_COUNT = 13
+    /* 1u << 13 is 0.4's TMS_FIRST_MUTATION (main): never set on 0.3.x */
+    TMS_FIRST_SALE = 1u << 14,                               /* a fish sold: fry for sale in the shop (0.3.5) */
+    TMS_SEAHORSE_FED = 1u << 15,                             /* the seahorse's first snack (0.3.6); its badge shows once it is bought */
+    TMS_COUNT = 16
 };
 
 typedef struct {
@@ -452,6 +455,8 @@ typedef struct tank {
      * light, no placement page. */
     uint8_t  tool;
     float    tool_idle;            /* seconds since the tool last touched the glass */
+    bool     tools_locked;         /* the toolbox's LOCK (0.3.5, saved): bare fingers never wipe or
+                                    * cut - only a tool from the box does (tank_lock_tools) */
     /* upkeep state (persisted by progression.c) */
     float    veg_h[VEG_BEDS_MAX][VEG_FRONDS_MAX]; /* per-frond height, VEG_NUB..1 (fraction
                                                * of the way from the floor to the surface) */
@@ -478,6 +483,7 @@ typedef struct tank {
     uint32_t sd_unlocks;
     uint32_t sd_paid_fish[N_FISH_MAX];
     int32_t  sd_colonies_paid, sd_inches_paid;
+    int32_t  sd_snacks_paid;       /* the seahorse's snacks paid so far (0.3.6) */
     /* the snail (SD_ITEM_SNAIL): crawls the glass toward the nearest film and
      * grazes it - the one creature in the tank that is not the model's. Its
      * position is saved; heading / target are not. */
@@ -504,6 +510,60 @@ typedef struct tank {
     float    urchin_rest;          /* seconds left of the rest */
     float    urchin_grazed_px;     /* grass it has eaten, lifetime, in the trim's px (VEG_PAY_PX:
                                     * the same length on every board; its card shows cm). Saved */
+    /* the seahorse (SD_ITEM_SEAHORSE, 0.3.6, 2026-10-15): the tame one. It
+     * holds a grass blade with its tail (a BEHIND-layer frond, so it is never
+     * covered), drifts to another now and then, and when a finger rests on
+     * the glass it lets go, swims over and curls its tail at the finger's
+     * edge - while it hangs there every fish earns trust twice as fast
+     * (SEAHORSE_TRUST_X in tank.c: helpers amplify a keeper act, never
+     * replace it). Its tally - seconds with the keeper, hitches, the trust it
+     * passed on - is saved; where it is and what it is doing is not (a boot
+     * puts it back on a blade). The model never sees it (schema v4 frozen). */
+    float    sh_x, sh_y;           /* its anchor: the coil's centre on the blade / at the finger / adrift */
+    int8_t   sh_bed, sh_frond;     /* a BLADE anchor: the frond it holds, -1 = none */
+    uint8_t  sh_akind;             /* what it holds or heads for: SH_ANCHOR_* (tank.h, below) */
+    int8_t   sh_aitem;             /* a POST anchor: the shop item it is on (castle 2, coral 3, cluster 4) */
+    float    sh_ax, sh_ay, sh_ahw; /* the anchor: the post's centre at the coil row and its half-width
+                                    * (a blade's are refreshed from the blade; the sand's is the floor) */
+    float    sh_aref;              /* a POST anchor: the piece's x when it took hold (moved = let go) */
+    bool     sh_hidden;            /* director `seahorse off`: not drawn (it still lives) - the frame-rate A/B. Not saved */
+    bool     sh_front;             /* its LANE: false = drawn with the fish (a hold on something behind them:
+                                    * an even frond, a piece placed BEHIND); true = drawn after the pieces in
+                                    * front, like the snail's front lane (a hold on an odd frond or a piece IN
+                                    * FRONT). Chosen with each hold (Strato 10-15: a seahorse can swim to a
+                                    * different z-layer and anchor) */
+    uint8_t  sh_mode;              /* SH_PERCH / SH_DRIFT / SH_HITCH (tank.h, below) */
+    int8_t   sh_facing;            /* +1 = its snout points right */
+    bool     sh_hitched;           /* at the finger's edge now: the trust boost is on */
+    bool     sh_credited;          /* this hold already counted a hitch */
+    float    sh_tx, sh_ty;         /* where it is heading (drift / the finger) */
+    float    sh_vx, sh_vy;         /* its velocity, px/s: it swims with momentum and the water's drag (the
+                                    * renderer pitches its head forward with speed). Not saved */
+    uint8_t  sh_pose;              /* the tail's last hold: SH_POSE_BLADE / SH_POSE_GRIP (the finger); the
+                                    * renderer morphs the open curl into it over sh_land (not saved) */
+    float    sh_land;              /* seconds into that hold, 0..SH_LAND_S: counts up settled, down once it
+                                    * lets go - so the coil closes and opens instead of snapping (Strato
+                                    * 10-15: "jump and click / lock into place when it goes to hitch") */
+    float    sh_stay;              /* seconds left on this blade, or of the linger after a hold */
+    float    sh_look;              /* on the sand: seconds to its next look for something better (a new
+                                    * plant or piece takes it off the bottom at once, not at the rest's end) */
+    float    sh_s;                 /* seconds with the keeper, awake and asleep (its card: days). Saved */
+    int32_t  sh_hitches;           /* times it has curled on the finger, lifetime. Saved */
+    float    sh_trust_passed;      /* trust the fish earned over the base rate while it hung there, lifetime. Saved */
+    /* its SNACKS (Strato 10-15): it never chases food like the fish or the
+     * shrimp, but a pellet that drifts within SH_REACH of its snout is
+     * eaten on the spot. Every snack counts (its card); the first one in
+     * SH_SNACK_COOL_S earns SD_SNACK sand dollars (progression.c pays
+     * sh_snack_pay against its ledger sd_snacks_paid), the rest in that
+     * window are just lunch - so a tap-spammer cannot farm it. All saved. */
+    int32_t  sh_eaten;             /* pellets snapped, lifetime */
+    int32_t  sh_snack_pay;         /* snacks that earned (the ledger pays these) */
+    float    sh_snack_cool;        /* seconds until the next snack earns again */
+    float    sh_snap;              /* the SNATCH (Strato 10-15: "its neck / head should jut out slightly to snatch
+                                    * it"): seconds into it, < 0 = none; the head juts SH_JUT px forward over
+                                    * SH_SNAP_S and the pellet is taken at SH_SNAP_AT, with the fish's eat cue */
+    int8_t   sh_snap_food;         /* the pellet it is snatching, -1 once taken (or missed) */
+    float    sh_turn;              /* a beat after it turned to face a pellet on its other side, before the snatch */
     /* where the keeper put the decor (2026-09-16, the placement page): the
      * sword plant's centre x along the floor (<= 0 = the default spot) and
      * its depth layer (DECOR_Z_*). Both saved. */
@@ -534,6 +594,17 @@ typedef struct tank {
     uint8_t  cluster_scheme;
     float    cluster_growth;       /* CLUSTER_START..CLUSTER_FULL; 0..1 = it fills out, 1..FULL = the tentacles come */
     float    cluster_acc;          /* awake seconds pooled, as coral_acc */
+    /* the pumpkin lantern (0.3.6, the first seasonal piece): its centre x
+     * on the floor (<= 0 = the default spot) and its depth, BACK or FRONT.
+     * Both saved. */
+    float    pumpkin_x;
+    uint8_t  pumpkin_z;
+    /* the ORDER of the pieces (2026-10-17, Strato: a stack of the pumpkin,
+     * the grass, the sword plant and a coral broke): every placeable piece
+     * has a rank; among pieces at one depth the higher rank is in front.
+     * By slot (tank_decor_slot): castle, coral, cluster, pumpkin, plant.
+     * Saved. */
+    uint8_t  decor_rank[5];
     /* the shrimp school (SD_ITEM_SHRIMP, see SHRIMP_*): how many (saved), the
      * pellets eaten toward the next one (0..SHRIMP_PER_JOIN, saved), the seconds
      * before another may join (saved), each shrimp's motion (not saved: a load
@@ -645,6 +716,9 @@ void  tank_init(tank_t *t, uint32_t seed);
  * the tank is full. */
 void  tank_new_population(tank_t *t);
 int   tank_add_fish(tank_t *t, int parent_a, int parent_b);
+/* a fry from the shop (0.3.5): no parents, the offered look, in at the
+ * surface; the slot, or -1 with no room */
+int   tank_add_bought_fry(tank_t *t, uint32_t body, uint32_t accent);
 /* a fish leaves the tank (2026-10-01, the milestones card's SELL): the fish
  * after it move down a slot - the order stays the order of arrival, so the
  * last fish is still the youngest - and everything the tank keeps by slot
@@ -759,6 +833,16 @@ void  tank_touch_drag(tank_t *t, float x, float y);
 enum { TOOL_HAND = 0, TOOL_SPONGE, TOOL_SCISSORS };
 #define TOOL_IDLE_S 120.0f
 void  tank_set_tool(tank_t *t, int tool);
+/* the LOCK beside the toolbox (0.3.5, 2026-10-14, Strato: "people only want
+ * to be able to trim or clean algae when they are selected"): locked, a
+ * bare-finger stroke neither wipes nor cuts - the guessing stroke is off and
+ * only the SPONGE and the SCISSORS tend the glass. Taps, the drag-down feed
+ * and the hold are untouched. Unlocked (the default, and every older save)
+ * is the guessing stroke as before. Saved. */
+void  tank_lock_tools(tank_t *t, bool lock);
+/* a finger on the glass that has travelled like a stroke, not a press that
+ * may yet be a tap (WIPE_ENGAGE_PX): the DONE chip steps aside for it */
+bool  tank_stroking(const tank_t *t);
 void  tank_feed(tank_t *t, float x, int n);
 
 /* Diagnostic: episodes where a starving fish ignored available food >4s.
@@ -816,6 +900,7 @@ extern const uint32_t LOOK_BODY[LOOK_N];
 extern const uint32_t LOOK_ACCENT[LOOK_N];
 void  tank_set_name(tank_t *t, int slot, const char *name);
 void  tank_set_look(tank_t *t, int slot, uint32_t body, uint32_t accent);
+uint32_t tank_fin_for(uint32_t body);   /* the fin tank_set_look gives that body (the shop's fry previews) */
 /* the bubble column is the keeper's to place (first-run setup, 2026-09-13):
  * x is clamped clear of the grass corner (the fish's resting spot) and the glass (grass is fine), the
  * column's live bubbles shift with it, and everything that knows the column
@@ -830,7 +915,7 @@ void  tank_set_bubble_x(tank_t *t, float x);
  * (progression_buy) and tank.c gives them their place. A bought thing is in
  * the tank for good. */
 enum { SD_ITEM_PLANT = 1u << 0, SD_ITEM_SNAIL = 1u << 1, SD_ITEM_CASTLE = 1u << 2, SD_ITEM_CORAL = 1u << 3, SD_ITEM_CLUSTER = 1u << 4, SD_ITEM_SHRIMP = 1u << 5,
-       SD_ITEM_URCHIN = 1u << 6, SD_ITEM_COUNT = 7 };
+       SD_ITEM_URCHIN = 1u << 6, SD_ITEM_SEAHORSE = 1u << 7, SD_ITEM_PUMPKIN = 1u << 8, SD_ITEM_COUNT = 9 };
 /* per-fish paid bits (sd_paid_fish) */
 enum { SD_PAID_JUV = 1u << 0, SD_PAID_ADULT = 1u << 1, SD_PAID_ELDER = 1u << 2, SD_PAID_TRUST = 1u << 3 };
 #define PX_PER_INCH 24.0f          /* the tank reads as ~15 in tall; a fish ~1.7 in */
@@ -859,6 +944,7 @@ int   tank_shrimp_tap(tank_t *t, float x, float y);
 void  tank_castle_place(tank_t *t);
 void  tank_coral_place(tank_t *t);
 void  tank_cluster_place(tank_t *t);
+void  tank_pumpkin_place(tank_t *t);
 /* placing the decor (2026-09-16, Strato: a bought piece "should allow the
  * player to place the piece wherever they like", with a depth choice): a
  * placeable item has a centre x along the floor - clamped inside the
@@ -937,6 +1023,18 @@ float    tank_coral_growth(const tank_t *t);      /* CORAL_START..CORAL_FULL (CO
 typedef struct { const char *name; uint32_t coral, tube, brain; } cluster_scheme_t;
 extern const cluster_scheme_t CLUSTER_SCHEMES[CLUSTER_SCHEME_N];
 float    tank_cluster_growth(const tank_t *t);    /* CLUSTER_START..CLUSTER_FULL (CLUSTER_FULL when unset) */
+/* the pumpkin lantern (0.3.6, Strato 2026-10-17: "a seasonal decoration
+ * which we will drop from the shop after October", 75 sand dollars): a
+ * carved jack-o'-lantern ~88 x 82 px with a candle inside, drawn
+ * procedurally in render.c. With the light ON it is a pumpkin with a lit
+ * face; with the light OFF the candle has the tank to itself and its warm
+ * glow lights the water, the floor, the grass, the decor and every critter
+ * near it ("finally a good reason to turn the tank light off"). Item 8,
+ * BEHIND or IN FRONT of the plant layer, like the corals. The shop sells it
+ * while SD_PUMPKIN_IN_SHOP (the first release after October 31 drops it);
+ * one bought stays for good. */
+#define PUMPKIN_HALF_W    44
+#define PUMPKIN_X_DEFAULT TANK_FLOOR_X(222.0f)   /* the open floor between the reef bed and bed 2 (the plant's gap) */
 int      tank_cluster_scheme(const tank_t *t);    /* 0..CLUSTER_SCHEME_N-1 */
 void     tank_cluster_set_scheme(tank_t *t, int i);
 extern const uint32_t CORAL_PAL[CORAL_N];
@@ -956,6 +1054,24 @@ float tank_decor_half_w(int item);         /* half the footprint, for the page's
  * state so a later purchase starts fresh. */
 int   tank_decor_hit(const tank_t *t, float x, float y);
 void  tank_decor_reset(tank_t *t, int item);
+/* the order of the pieces (2026-10-17): render.c paints the placeable pieces
+ * by depth, then by RANK (tank_t.decor_rank). A bought piece goes on top of
+ * its depth (tank_decor_raise); the placement page's two arrows swap it with
+ * its neighbour at the same depth (tank_decor_shift). Ties - every older
+ * save - keep the old fixed order: castle, coral, cluster, pumpkin, then the
+ * plant. The grass beds are the plant layer itself (a piece BEHIND is under
+ * every blade, a piece IN FRONT over them); only the sword plant, bed 3, is
+ * a piece with a rank of its own at BACK or FRONT. */
+#define DECOR_SLOTS 5
+int   tank_decor_slot(int item);                  /* 0..DECOR_SLOTS-1 (the tie order), or -1 */
+int   tank_decor_slot_item(int slot);
+bool  tank_decor_owned(const tank_t *t, int item);
+int   tank_decor_rank(const tank_t *t, int item);
+int   tank_decor_order(const tank_t *t, int items[DECOR_SLOTS]);   /* the owned pieces, back to front (rank, then slot); the count */
+bool  tank_decor_above(const tank_t *t, int a, int b);             /* a is painted over b: a greater depth, or at one depth the higher rank */
+void  tank_decor_raise(tank_t *t, int item);                       /* on top: the highest rank of all + 1 */
+int   tank_decor_neighbor(const tank_t *t, int item, int dir);     /* the piece just in front (+1) or behind (-1) at its depth, or -1 */
+bool  tank_decor_shift(tank_t *t, int item, int dir);              /* swap ranks with that neighbour; false = none */
 /* the snail has two poses (Strato's sprites, 2026-09-15): UPRIGHT, walking
  * the tank floor (nothing to graze: it comes down and ambles along the
  * bottom, turning at the ends), and flat ON THE GLASS (crawling to film and
@@ -984,5 +1100,49 @@ bool  tank_snail_hit(const tank_t *t, float x, float y);
 void  tank_urchin_place(tank_t *t);
 bool  tank_urchin_hit(const tank_t *t, float x, float y);
 bool  tank_urchin_chewing(const tank_t *t);   /* at a frond's foot, eating (render: the spines work) */
+/* the seahorse (0.3.6; the fields above have the story). Its anchor
+ * (sh_x, sh_y) is the centre of its tail's coil: on a blade that is the
+ * blade's spine at the grip row (the renderer adds the sway); adrift and at
+ * the finger it is where the coil would be. The body stands ~30 px over it.
+ * SH_GRIP_FRAC of the way up the blade, on a blade at least SH_MIN_H tall
+ * (so the coil is well clear of the sand); only EVEN fronds, the layer
+ * drawn behind the fish. A hold brings it to SH_HITCH_OFF px beside the
+ * finger (a fingertip covers ~120 px of this glass: under it, nobody would
+ * see it), toward the middle of the tank. */
+enum { SH_PERCH = 0, SH_DRIFT = 1, SH_HITCH = 2 };
+/* THE UNIVERSAL ANCHOR (Strato 10-15: "some kind of universal anchor shape
+ * that you can apply to any object or decoration"): everything the seahorse
+ * holds is a vertical POST - a centre x, the row the coil sits on, and a
+ * half-width. The coil wraps that post the one way (render.c: the upper half
+ * of each loop passes behind it, so whatever the post is shows through), so
+ * a new hitching point is a line in sh_posts(), never new drawing. Kinds:
+ * BLADE (a grass or sword-plant frond, swaying: the post follows it), POST
+ * (a solid part of a decoration at any depth: a castle tower, the coral's
+ * trunk, a tube sponge on the reef - a hold in front of the fish puts it in
+ * its front lane, sh_front) and SAND (the floor - when there is
+ * nothing to hold it rests on the bottom with its tail curled under it, and
+ * lifts off to look again now and then). Blades first, posts second, the
+ * sand last. */
+enum { SH_ANCHOR_NONE = 0, SH_ANCHOR_BLADE = 1, SH_ANCHOR_POST = 2, SH_ANCHOR_SAND = 3 };
+enum { SH_POSE_BLADE = 1, SH_POSE_GRIP = 2 };
+#define SH_LAND_S     0.7f
+#define SH_GRIP_FRAC  0.55f
+#define SH_MIN_H      0.26f
+#define SH_HITCH_OFF  46.0f
+#define SH_BODY_UP    18.0f        /* the body's centre above the anchor (the hit test, the card's ring) */
+#define SH_REACH      13.0f        /* a pellet this close to its (jutted) snout is taken */
+#define SH_SENSE      26.0f        /* a pellet this close to its head starts a snatch - on either side: it turns to it first */
+#define SH_SNAP_S     0.32f        /* the snatch, head out and back */
+#define SH_SNAP_AT    0.14f        /* ... the pellet is taken at the head's furthest */
+#define SH_JUT        4.0f         /* px the head and neck jut forward */
+#define SH_TURN_S     0.18f        /* the beat after a turn */
+#define SH_SNAP_REST  1.0f         /* after a bite: no new snatch for this long (Strato 10-15: one neck movement
+                                    * per pellet, never a loop through a cluster) */
+float tank_seahorse_jut(const tank_t *t);          /* the head's jut right now, px (the renderer) */
+#define SH_SNACK_COOL_S (10.0f * 60.0f)   /* one PAID snack per this long (Strato: "10 minute cooldown so it can't be abused") */
+void  tank_seahorse_place(tank_t *t);              /* fresh in the tank: on a blade, or adrift by the grass */
+const char *tank_seahorse_holding(const tank_t *t); /* its card: A BLADE / A LEAF / THE CASTLE / THE CORAL / THE REEF / THE SAND */
+bool  tank_seahorse_hit(const tank_t *t, float x, float y);
+float tank_seahorse_days(const tank_t *t);        /* its card: whole days with the keeper */
 
 #endif

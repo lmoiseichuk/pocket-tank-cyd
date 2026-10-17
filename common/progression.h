@@ -184,6 +184,7 @@ const char *const *progression_fry_tip(int kind);
 #define SD_STAGE_ELDER 25
 #define SD_BIRTH       20
 #define SD_TRUST       15
+#define SD_SNACK       10          /* the seahorse's snack, one paid per SH_SNACK_COOL_S (0.3.6) */
 #define SD_CHORE       25          /* per SD_CHORE_EVERY colonies / SD_TRIM_CM of grass */
 #define SD_CHORE_EVERY 100
 /* the grass pays by length cut: 250 cm (2026-09-29, Strato; was 100 inches =
@@ -197,6 +198,8 @@ const char *const *progression_fry_tip(int kind);
 #define SD_PRICE_CLUSTER 240
 #define SD_PRICE_SHRIMP 180       /* 2026-09-29, Strato (first 300, then 180) */
 #define SD_PRICE_URCHIN 120       /* 2026-10-02: the grass's snail (the snail is 80, the grass pays 25 per 250 cm) */
+#define SD_PRICE_SEAHORSE 220     /* 0.3.6, Strato 2026-10-15: between the shrimp (180) and the cluster (240) */
+#define SD_PRICE_PUMPKIN 75       /* 0.3.6, Strato 2026-10-17: the seasonal lantern, "affordable" */
 typedef struct {
     uint32_t    bit;               /* SD_ITEM_* */
     const char *name;              /* <= 12 chars, the pixel font */
@@ -208,6 +211,12 @@ extern const sd_item_t SD_ITEMS[SD_ITEM_COUNT];
  * true = unlocked, placed in the tank (tank_plant_place / tank_snail_place)
  * and saved at once */
 bool progression_buy(tank_t *t, int item);
+/* the seasonal pumpkin (0.3.6): sold while SD_PUMPKIN_IN_SHOP - the first
+ * release after October 31 sets it to 0 (Strato: no date check, a board
+ * keeps selling it until it is updated). One bought stays in its tank, so
+ * the shop keeps its row for the keeper who has one. */
+#define SD_PUMPKIN_IN_SHOP 1
+bool progression_pumpkin_offered(const tank_t *t);
 /* the sale back (2026-09-24, Strato): a placeable piece sells for SD_SELL_PCT
  * of its price (the snail is a permanent resident), goes back to the shop at
  * full price and to its factory state; false = not owned or not for sale.
@@ -232,6 +241,35 @@ bool progression_sell(tank_t *t, int item);
 #define SD_FISH_ELDER  60
 #define FISH_KEEP_MIN  2
 #define SELL_FRY_MEALS 12
+/* FRY FOR SALE (0.3.5, Strato: "when a player sells a fish for the first
+ * time it should award a tank milestone badge and also open up fry
+ * purchasing in the shop as long as there is at least one open slot"). The
+ * first sale earns TMS_FIRST_SALE (a tank that sold before 0.3.5 gets it at
+ * its first boot), and from then on the shop's first row is FRY: three fry,
+ * each a look of its own, SD_PRICE_FRY apiece. A bought fry leaves a blank
+ * where it stood - any number can be bought while slots and dollars last -
+ * and nothing comes back until FRY_OFFER_S of tank time (awake or asleep,
+ * no wall clock needed: the pendant may have none) brings a fresh three.
+ * A bought fry is a newborn without parents: the birth flow welcomes it
+ * (announce, name, family), no birth dollars, its stages pay as any fish's.
+ * Taking the tank's last slot calls off a staged arrival.
+ * The offer is a seed: each fry's look is a hash of it and its place, so
+ * the save keeps two bytes for the seed, two for the clock, one for the
+ * blanks - in padding 0.4 (main) leaves free. 0.3.x rolls the colors from
+ * 0.4's nine (main: LOOK_COLORS), so a bought fry is an exact genome there;
+ * 0.4 rolls the form (shape, fins, pattern) from the same hash. */
+#define SD_PRICE_FRY   200
+#define FRY_OFFER_N    3
+#define FRY_OFFER_S    (24 * 3600.0f)
+typedef struct { uint32_t body, accent; bool sold; } fry_offer_t;
+bool  progression_fry_for_sale(const tank_t *t);   /* the first sale's badge is earned */
+bool  progression_fry_room(const tank_t *t);       /* a slot free and no welcome owed */
+void  progression_fry_offer(int k, fry_offer_t *o);
+int   progression_fry_left(void);                  /* fry not yet bought in this offer */
+float progression_fry_new_in_s(void);              /* tank seconds until a fresh three */
+bool  progression_buy_fry(tank_t *t, int k);
+void  progression_fry_roll(tank_t *t);             /* director / tests: a fresh three now */
+void  progression_fry_open(tank_t *t);             /* director / tests: the shop's fry, as if a fish was sold */
 int  progression_fish_value(const tank_t *t, int fish);      /* what it would fetch now */
 bool progression_fish_sellable(const tank_t *t, int fish);   /* false: the last pair, or a welcome is owed */
 bool progression_sell_fish(tank_t *t, int fish);
@@ -240,7 +278,7 @@ int  progression_sd_take_award(void);
 /* director / tests: dollars from nowhere (negative takes them away) */
 void progression_sd_grant(tank_t *t, int n);
 /* the earn table for the shop page: one line per source, "+N WORDS" */
-#define SD_EARN_LINES 6
+#define SD_EARN_LINES 7
 const char *const *progression_sd_earn_lines(void);
 
 /* population ceiling. Compile-time so the device can ship lower until its
@@ -255,10 +293,15 @@ const char *const *progression_sd_earn_lines(void);
  * glanced at over weeks, so the arc is hours/days, not minutes. */
 /* tended seconds to each stage (2026-08-30, halved from 1/6/48 h: a fresh
  * tank now starts as FRY, so the first growth spurt lands in the keeper's
- * first session and elder stays a multi-day achievement) */
-#define STAGE_JUV_AGE    (30 * 60)
-#define STAGE_ADULT_AGE  (3 * 3600)
-#define STAGE_ELDER_AGE  (24 * 3600)
+ * first session and elder stays a multi-day achievement). 0.3.5 (2026-10-14,
+ * Strato: "all of the age stages should last longer, they happen quite fast
+ * now"): four times as long - 2 h / 12 h / 4 days. The fry gates read the
+ * same numbers (a new fry waits on the youngest growing up), so the tank
+ * fills more slowly too. A fish already past a stage under the old numbers
+ * keeps it (apply_stage never takes a stage away). */
+#define STAGE_JUV_AGE    (2 * 3600)
+#define STAGE_ADULT_AGE  (12 * 3600)
+#define STAGE_ELDER_AGE  (96 * 3600)
 /* trait drift: one full unit (0.11 of the 0..1 trait) per this many hours of
  * sustained pressure */
 #define DRIFT_HOURS      2.0f
