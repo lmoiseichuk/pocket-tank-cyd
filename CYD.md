@@ -964,6 +964,15 @@ upstream's text but for one block.
    make -C sim check-all          # the 1.8, the round board, the watch, the square, then the 320 x 240
    ```
 
+   On Linux (glibc), upstream's round world fails `--selftest-tend` at the
+   two-fish hold from v0.3.5 (`f827ba8`) on - "the second fish to reach the
+   finger was not credited" - and upstream's own tree fails it the same way,
+   so `check-all` stops there and never runs the watch, the square or the
+   320 x 240. Run `make -C sim WATCH=1 check`, `SQUARE=1 check` and
+   `320X240=1 check` separately, the round board's other selftests by hand,
+   and compare its `--selftest-tend` output against upstream's worktree
+   (step 4). Remove this note once an upstream release passes it.
+
 4. **Upstream's four worlds against upstream's own tree.** Build upstream's
    simulator in a worktree of `upstream/main` (it needs its own `sim/lvgl`),
    write each world's pages with `--snapshot <prefix>` from `fishsim`,
