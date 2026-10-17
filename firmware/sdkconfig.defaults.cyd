@@ -18,6 +18,14 @@ CONFIG_POCKET_TANK_IMU_MPU6050_UP_AXIS=0
 CONFIG_POCKET_TANK_IMU_MPU6050_UP_NEGATIVE=y
 CONFIG_POCKET_TANK_IMU_MPU6050_OUT_AXIS=2
 CONFIG_POCKET_TANK_IMU_MPU6050_OUT_NEGATIVE=y
+# The QMI8658C mounted the same way, flat against the back as the MPU-6050 is:
+# measured 2026-10-17 on a second CYD standing in its stand (leaning back about
+# 45 degrees), X at -0.71 g, Z at -0.65 g, Y at +0.09 g -- the MPU-6050's axes
+# and signs. The AMOLED's defaults (Y up, Z out positive) would not flip.
+CONFIG_POCKET_TANK_IMU_QMI8658_UP_AXIS=0
+CONFIG_POCKET_TANK_IMU_QMI8658_UP_NEGATIVE=y
+CONFIG_POCKET_TANK_IMU_QMI8658_OUT_AXIS=2
+CONFIG_POCKET_TANK_IMU_QMI8658_OUT_NEGATIVE=y
 # Face down for 2 s sleeps the tank, face up wakes it (unless the SLEEP row
 # says NEVER).
 CONFIG_POCKET_TANK_IMU_FACE_DOWN_SLEEP=y

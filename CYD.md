@@ -612,7 +612,7 @@ ones at boot, in this order, and uses the first that answers:
 
 | chip | I2C address | WHO_AM_I | Kconfig line (CYD default) | notes |
 |---|---|---|---|---|
-| QMI8658 / QMI8658C | 0x6B, or 0x6A | 0x05 | `POCKET_TANK_IMU_QMI8658` (y) | the AMOLED board's chip; on the CYD its axes need one bench reading (*Still open*) |
+| QMI8658 / QMI8658C | 0x6B, or 0x6A | 0x05 | `POCKET_TANK_IMU_QMI8658` (y) | the AMOLED board's chip; on the CYD mounted as the MPU-6050 is, axes measured 2026-10-17, in `sdkconfig.defaults.cyd` |
 | MPU-6050 (GY-521 and the like) | 0x68 (AD0 low), or 0x69 | 0x68; clone dies reporting 0x70, 0x71, 0x72, 0x73 or 0x98 are taken too | `POCKET_TANK_IMU_MPU6050` (y) | what is fitted now; axes measured, in `sdkconfig.defaults.cyd` |
 
 Anything else on the bus is ignored; with neither answering, the boot log
@@ -725,11 +725,12 @@ there needs the IMU's INT line wired (below).
   or glue it that way, or re-read the axes (*The IMU*) for the mounting it
   gets. Its power LED draws 1-3 mA, which dominates deep sleep on a cell -
   lift it, or its resistor, if the cell's life matters.
-- **The QMI8658C, when it arrives,** is probed first and takes over by
-  itself, but its axes are the AMOLED's defaults
-  (`POCKET_TANK_IMU_QMI8658_UP_AXIS` / `_UP_NEGATIVE` / `_OUT_AXIS`, and
-  `_OUT_NEGATIVE` for face down): one upright and one flat reading with the
-  director's `imu` set them for the CYD.
+- **The QMI8658C** is fitted on a second CYD (2026-10-17), flat against the
+  back as the MPU-6050 is: it answers at 0x6B, is probed first and takes over
+  by itself, and its axes, read in the stand with the director's `imu`, are
+  the MPU-6050's (X up, negative; Z out of the glass, negative) -- now in
+  `sdkconfig.defaults.cyd`. A different mounting is one upright and one flat
+  reading again.
 - **Waking from deep sleep on movement** needs the IMU's INT line on an RTC
   GPIO - GPIO21 or GPIO14 on the 4-pin expansion socket (not GPIO3, a
   strapping pin; never GPIO0) - an ext1 wake beside BOOT's ext0, and the
