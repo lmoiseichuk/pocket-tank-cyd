@@ -3739,7 +3739,15 @@ static int selftest_shop(void) {
                   secs3 = 0; while (!(tank.sh_mode == SH_PERCH && tank.sh_akind == SH_ANCHOR_SAND) && secs3 < 60) { SHOP_TICK(60); secs3++; }
                   if (tank.sh_mode != SH_PERCH || tank.sh_akind != SH_ANCHOR_SAND) { printf("FAIL: the leaf cut, it did not go back to the sand (mode %d kind %d)\n", tank.sh_mode, tank.sh_akind); return 1; } }
                 float sx1 = tank.sh_x; int lifted = 0;
+#ifdef CONFIG_POCKET_TANK_320X240
+                /* (this fork) looked for every frame, not every second: on the 320 px floor the sand it rests on can
+                   lie at the look's own limit, TANK_FX1 - 40, and a look drawn past the limit is a hop of a pixel or
+                   two, over in a sixth of a second - between two of the seconds. v0.3.7's spam-feeding check above
+                   moved the draws so that the leaf's sand came to x 279, the limit 280 (v0.3.8's sync) */
+                for (int f = 0; f < 60 * 130 && !lifted; f++) { SHOP_TICK(1); lifted = tank.sh_mode == SH_DRIFT; }
+#else
                 for (int sec = 0; sec < 130 && !lifted; sec++) { SHOP_TICK(60); lifted = tank.sh_mode == SH_DRIFT; }
+#endif
                 if (!lifted) { printf("FAIL: it never lifted off the sand to look around\n"); return 1; }
                 SHOP_TICK(60 * 20);
                 if (tank.sh_mode != SH_PERCH || tank.sh_akind != SH_ANCHOR_SAND || fabsf(tank.sh_x - sx1) < 1) { printf("FAIL: after the look it did not settle on a new spot of sand (mode %d kind %d x %.0f -> %.0f)\n", tank.sh_mode, tank.sh_akind, sx1, tank.sh_x); return 1; }
