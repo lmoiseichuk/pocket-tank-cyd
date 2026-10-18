@@ -152,7 +152,7 @@ taps: the first shows the refund and OK?, the second sells.
 | row | choices | what it does |
 |---|---|---|
 | BRIGHTNESS | 30% / 60% / 100% | the backlight, kept in NVS |
-| VOLUME | OFF / QUIET / NORMAL | the sound, kept in NVS. "FISH ARE QUIET AT NIGHT" under it is a note, not a row |
+| VOLUME | OFF / QUIET / NORMAL | the sound, kept in NVS. "FISH ARE QUIET AT NIGHT" under it is upstream's note, not a row, and has been stale since 0.3.7: the light no longer changes the sound |
 | LIGHTS OUT | DOUBLE-TAP, or 5 SEC to 30 MIN | DOUBLE-TAP: the double-tap works the tank light. A time: the light goes out by itself after that long unhandled (*The light*) |
 | AUTO FEED | ON / OFF | ON: the tank feeds a fish that is really hungry. OFF: only you feed; a fish left starving in a lit tank slowly loses trust |
 | SCREEN | UPRIGHT / FLIPPED | with no IMU answering: turns the picture and the touch 180 degrees, kept in NVS |
