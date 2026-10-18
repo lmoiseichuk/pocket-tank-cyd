@@ -47,7 +47,7 @@ no toolchain needed. Come hang out with other keepers on the
 **[Pocket Tank Discord](https://pocketank.com/discord)**: show off your tank,
 get help, and share ideas for what comes next.
 
-The current release is **v0.3.6** (alpha); the settings page shows the one
+The current release is **v0.3.8** (alpha); the settings page shows the one
 on your tank. What changed in each release:
 **[pocketank.com/updates](https://pocketank.com/updates/)**.
 
@@ -261,7 +261,8 @@ fish in its own colors, with an outline for each open place.
 ![A gate's HOW? tip](docs/media/sim-fry-how.png)
 
 **Sand dollars.** Caring for the tank earns points, and the shop spends
-them on things for the tank. A meal the fish eat from your hand pays 2; a
+them on things for the tank. A meal the fish eat from your hand pays 2
+(one every five minutes, however many taps); a
 fish growing up pays 5, 10 and 25 for juvenile, adult and elder; a fry
 born 20; a fish that comes to trust you completely 15; every hundred algae
 colonies you wipe away pay 25, and so does every 250 cm of grass you
@@ -433,7 +434,9 @@ sale; they are permanent residents.
 ![SELL armed in the castle's modal](docs/media/sim-shop-sell.png)
 
 **The light.** Two quick taps on the glass turn the tank light off and on;
-in the dark the fish rest and the palette dims. The first time a double-tap
+in the dark the fish rest and the palette dims, and everything else works
+as it does with the light on: the sounds, the finger, the seahorse (it
+rests on its perch until the light comes back). The first time a double-tap
 turns the light off, a small LIGHTS OUT notice says what happened and how
 to turn it back on, once per tank. The settings page has a
 LIGHTS OUT row that can hand the light to the tank instead: step it from

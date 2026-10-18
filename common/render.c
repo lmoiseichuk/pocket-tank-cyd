@@ -3472,9 +3472,9 @@ static void seahorse_card_draw(ctx_t *c, const tank_t *t) {
     snprintf(line, sizeof line, "%d PELLET%s SNAPPED", (int)t->sh_eaten, t->sh_eaten == 1 ? "" : "S");
     draw_text(c, TX, Y + UI(124), UI_TEXT(2), 0xffffff, line);
     char now[32];
-    if (t->night) snprintf(now, sizeof now, "ASLEEP");
-    else if (t->sh_hitched) snprintf(now, sizeof now, "ON YOUR FINGER");
+    if (t->sh_hitched) snprintf(now, sizeof now, "ON YOUR FINGER");
     else if (t->sh_mode == SH_HITCH) snprintf(now, sizeof now, "SWIMMING TO YOU");
+    else if (t->night && t->sh_mode == SH_PERCH) snprintf(now, sizeof now, "ASLEEP");   /* only once it holds on (0.3.7: it said ASLEEP on the finger) */
     else if (t->sh_mode == SH_PERCH && t->sh_akind == SH_ANCHOR_SAND) snprintf(now, sizeof now, "RESTING ON THE SAND");
     else if (t->sh_mode == SH_PERCH) snprintf(now, sizeof now, "HOLDING %s", tank_seahorse_holding(t));
     else snprintf(now, sizeof now, "ADRIFT");

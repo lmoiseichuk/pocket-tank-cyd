@@ -186,6 +186,24 @@ static void film_just_over(tank_t *t, float share) {
 
 /* ---------- headless selftest ---------- */
 static int selftest(void) {
+    {   /* every pellet reaches the floor (0.3.7, a keeper on the watch: "pellets seem to
+           disappear before they reach the bottom where the shrimp can reach them"):
+           a fishless tank, a feeding at the deepest drop and at either side */
+        static tank_t ft; tank_init(&ft, 3);
+        float xs[3] = { TANK_W * 0.5f, TANK_FX0 + 60, TANK_FX1 - 60 };
+        float worst = 0;
+        for (int j = 0; j < 3; j++) tank_feed(&ft, xs[j], 3);
+        bool landed[MAX_FOOD] = { 0 };
+        for (int i = 0; i < 60 * 120; i++) {
+            tank_tick(&ft, 1.0f / 60.0f, advisor_rules);
+            for (int k = 0; k < MAX_FOOD; k++)
+                if (ft.food[k].alive && ft.food[k].floor_s > 0 && !landed[k]) { landed[k] = true; if (ft.food[k].age > worst) worst = ft.food[k].age; }
+        }
+        int n = 0, ok = 0;
+        for (int k = 0; k < 9 && k < MAX_FOOD; k++) { n++; if (landed[k]) ok++; }
+        if (ok != n) { printf("FAIL: %d of %d pellets vanished in the water before the floor (life %.0f s)\n", n - ok, n, FOOD_LIFE_S); return 1; }
+        printf("selftest: pellets: all %d reached the floor, the longest fall %.1f s (the water's cap %.1f s)\n", n, worst, FOOD_LIFE_S);
+    }
     tank_init(&tank, 1234);
     tank_new_population(&tank);
     print_roster(&tank);
@@ -2249,7 +2267,6 @@ static void sound_frame(uint32_t now, float dt) {
     if (selected_fish >= 0 && s_prev_sel < 0) snd(SND_CARD_OPEN, AUDIO_PITCH_ONE);
     if (selected_fish < 0 && s_prev_sel >= 0) snd(SND_CARD_CLOSE, AUDIO_PITCH_ONE);
     s_prev_sel = selected_fish;
-    if (s_adev) { SDL_LockAudioDevice(s_adev); audio_set_night(tank.night); SDL_UnlockAudioDevice(s_adev); }
 }
 
 /* brain indicator, top-right: teal square = rules, amber = LLM */
@@ -3408,6 +3425,29 @@ static int selftest_shop(void) {
     if (tank.player_feedings != 1) { printf("FAIL: the eaten feeding did not count as a meal (%d)\n", tank.player_feedings); return 1; }
     want += SD_MEAL; SHOP_WANT("a meal");
     printf("selftest-shop: an uneaten feeding paid nothing, the eaten one paid %d\n", SD_MEAL);
+    /* spam feeding (0.3.7, a keeper on Discord 10-18: "repeatedly tapping the
+       top of the screen ... you can get 2 sand dollars per each pellet eaten"):
+       taps at the surface while the school eats still count as meals (the
+       fry's gates), but they pay SD_MEAL once per SD_MEAL_GAP_S */
+    {
+        for (int i = 0; i < MAX_FOOD; i++) tank.food[i].alive = false;
+        SHOP_TICK(60 * (int)(SD_MEAL_GAP_S + 1));                  /* clear of the meal above */
+        for (int i = 0; i < tank.n_fish; i++) { tank.fish[i].hunger = 9.5f; tank.fish[i].x = 200 + i * 12; tank.fish[i].y = 20; }
+        int m0 = tank.player_feedings, b0 = tank.sd_balance;
+        for (int k = 0; k < 120; k++) { tank_touch_tap(&tank, 200 + (k % 5) * 10, tank_glass_top(200) + 4); SHOP_TICK(15); }   /* 4 taps a second, 30 s */
+        int meals = tank.player_feedings - m0;
+        if (meals < 2) { printf("FAIL: the spam test fed only %d meal(s) - it no longer reproduces the report\n", meals); return 1; }
+        if (tank.sd_balance - b0 != SD_MEAL) { printf("FAIL: 30 s of spam feeding (%d meals) paid %d sand dollars, want %d\n", meals, tank.sd_balance - b0, SD_MEAL); return 1; }
+        want += SD_MEAL; SHOP_WANT("spam feeding");
+        for (int i = 0; i < MAX_FOOD; i++) tank.food[i].alive = false;
+        SHOP_TICK(60 * (int)(SD_MEAL_GAP_S + 1));                  /* the gap passes: the next meal pays again */
+        for (int i = 0; i < tank.n_fish; i++) { tank.fish[i].hunger = 9.5f; tank.fish[i].x = 220; tank.fish[i].y = 20; }
+        int m1 = tank.player_feedings;
+        tank_feed(&tank, 220, 3); SHOP_TICK(60 * 10);
+        if (tank.player_feedings != m1 + 1) { printf("FAIL: a feeding after the gap was not a meal\n"); return 1; }
+        want += SD_MEAL; SHOP_WANT("a meal after the gap");
+        printf("selftest-shop: 30 s of spam feeding = %d meals (the fry still counts them) but +%d; the next meal after %.0f min pays again\n", meals, SD_MEAL, SD_MEAL_GAP_S / 60);
+    }
     /* stages: paid once each, in order, and never again after a save round-trip */
     progression_set_age(&tank, 0, STAGE_JUV_AGE + 1);   SHOP_TICK(2); want += SD_STAGE_JUV;   SHOP_WANT("juvenile");
     progression_set_age(&tank, 0, STAGE_ADULT_AGE + 1); SHOP_TICK(2); want += SD_STAGE_ADULT; SHOP_WANT("adult");
@@ -3763,6 +3803,32 @@ static int selftest_shop(void) {
                 if (tank.sd_balance != bal0 + 2 * SD_SNACK) { printf("FAIL: after the cooldown the snack did not pay (%d)\n", tank.sd_balance - bal0); return 1; }
                 printf("selftest-shop: seahorse: snacks - a far pellet ignored, one in reach snatched with the head out (+%d, no meal), a second behind it: a turn then eaten for nothing, after %.0f min of cooldown the next pays again; %d snapped\n",
                        SD_SNACK, SH_SNACK_COOL_S / 60, (int)(tank.sh_eaten - eaten0));
+                /* the light off (0.3.7, Strato 10-18: "the seahorse stayed exactly
+                   where it was ... until the light turned back on"): it still
+                   snacks, comes to a finger, goes home to a hold after it, and
+                   then rests on that hold - no wander - till the light */
+                {
+                    bool auto0 = tank.light_auto; tank.light_auto = false; tank.light_manual_off = true; SHOP_TICK(1);   /* the keeper's double-tap */
+                    if (!tank.night) { printf("FAIL: the light did not go off\n"); return 1; }
+                    SHOP_TICK(60 * 4);
+                    tank.sh_snack_cool = 0; int e0 = tank.sh_eaten;
+                    float nmx = tank.sh_x + 16 * tank.sh_facing, nmy = tank.sh_y - 21;
+                    TEST_PELLET(0, nmx + 4, nmy - 3);
+                    SHOP_TICK(60 * 2);
+                    if (tank.sh_eaten != e0 + 1) { printf("FAIL: in the dark a pellet in reach was not snapped\n"); return 1; }
+                    float fx = tank.sh_x < TANK_W / 2 ? TANK_FX1 - 90 : TANK_FX0 + 90, fy = TANK_BOT - 170;
+                    int ns = 0; while (!tank.sh_hitched && ns < 40) { for (int i = 0; i < 60; i++) { tank_touch_hold(&tank, fx, fy); SHOP_TICK(1); } ns++; }
+                    if (!tank.sh_hitched) { printf("FAIL: in the dark it never reached the finger\n"); return 1; }
+                    float lx = tank.sh_x, ly = tank.sh_y;
+                    int nh = 0; while (tank.sh_mode != SH_PERCH && nh < 60) { SHOP_TICK(60); nh++; }
+                    if (tank.sh_mode != SH_PERCH) { printf("FAIL: in the dark, off the finger, it hung in the water (mode %d at %.0f,%.0f; the finger left it at %.0f,%.0f)\n", tank.sh_mode, tank.sh_x, tank.sh_y, lx, ly); return 1; }
+                    float moved = tank_dist(lx, ly, tank.sh_x, tank.sh_y);
+                    int rb = tank.sh_bed, rf = tank.sh_frond; uint8_t rk = tank.sh_akind; float rx = tank.sh_x;
+                    SHOP_TICK(60 * 60 * 5);                                  /* five dark minutes: it stays on that hold */
+                    if (tank.sh_mode != SH_PERCH || tank.sh_bed != rb || tank.sh_frond != rf || tank.sh_akind != rk || fabsf(tank.sh_x - rx) > 1) { printf("FAIL: in the dark it wandered off its hold (mode %d)\n", tank.sh_mode); return 1; }
+                    tank.light_manual_off = false; tank.light_auto = auto0; SHOP_TICK(1);
+                    printf("selftest-shop: seahorse in the dark: a snack in reach eaten, at the finger in %d s, home %.0f px to a hold in %d s, still on it after 5 min\n", ns, moved, nh);
+                }
                 #undef TEST_PELLET
             }
             /* its tap and its card; the seahorse itself drawn in the tank */
@@ -4163,7 +4229,7 @@ static int selftest_shop(void) {
             if (k == MAX_FOOD) { printf("FAIL: no free pellet slot\n"); return 1; } \
             food_t *p_ = &tank.food[k]; memset(p_, 0, sizeof *p_); p_->alive = true; p_->x = (px); p_->y = (py); p_->age = (page); } while (0)
         for (int k = 0; k < MAX_FOOD; k++) tank.food[k].alive = false;
-        /* the floor rest, far from the school: gone at 45 s in the water, 15 s after landing on the floor.
+        /* the floor rest, far from the school: gone at FOOD_LIFE_S in the water, 15 s after landing on the floor.
            The school is put off its food for it, by its own rule - a fouled glass: it swims the bowl's
            floor and the watch's end to end inside the 15 s and ate the pellet (the rectangle's far end
            was a second or two out of its reach) */
@@ -4171,7 +4237,7 @@ static int selftest_shop(void) {
         int k;
         float far_x = tank.shrimp[0].x < TANK_W / 2 ? TANK_FX1 - 30 : TANK_FX0 + 30;   /* the floor's far end */
         PUT_PELLET(k, far_x, FOOD_FLOOR_Y, 43);
-        int kw; PUT_PELLET(kw, far_x, 200, 44.5f);
+        int kw; PUT_PELLET(kw, far_x, 200, FOOD_LIFE_S - 0.5f);
         SHRIMP_TICK(60);
         if (tank.food[kw].alive || !tank.food[k].alive) { printf("FAIL: a pellet in the water outlived %.0f s, or the floor pellet went early\n", FOOD_LIFE_S); return 1; }
         SHRIMP_TICK(60 * 13);

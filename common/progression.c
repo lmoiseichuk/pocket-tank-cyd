@@ -328,6 +328,7 @@ static bool  s_setup_pending;        /* the first-run flow still owed (setup.c) 
 static int   s_newborn = -1;         /* the arrival still owed its birth flow (setup.c), or -1 */
 static int   s_sd_pending;           /* dollars awarded and not yet shown (the toast) */
 static int32_t s_sd_prev_feedings = -1;   /* player_feedings at the last tick (-1 = adopt at the next) */
+static float   s_sd_meal_wait;            /* seconds before a meal pays again (SD_MEAL_GAP_S) */
 static int32_t s_sale_need;               /* player_feedings the next fry waits for since a fish was sold (0 = none sold) */
 static uint16_t s_fry_seed;               /* the fry offer (progression_fry_*): its seed, 0 = none drawn */
 static double   s_fry_age;                /* ... its age in tank seconds (a double, as s_age) */
@@ -390,7 +391,7 @@ static void sd_tick(tank_t *t) {
         if (f->trust >= 10.0f && !(*paid & SD_PAID_TRUST))               { *paid |= SD_PAID_TRUST; sd_award(t, SD_TRUST); }
     }
     if (s_sd_prev_feedings < 0) s_sd_prev_feedings = t->player_feedings;
-    if (t->player_feedings > s_sd_prev_feedings) sd_award(t, SD_MEAL * (t->player_feedings - s_sd_prev_feedings));
+    if (t->player_feedings > s_sd_prev_feedings && s_sd_meal_wait <= 0) { sd_award(t, SD_MEAL); s_sd_meal_wait = SD_MEAL_GAP_S; }   /* one pay per gap, however many meals */
     s_sd_prev_feedings = t->player_feedings;
     int32_t hund = t->algae_colonies / SD_CHORE_EVERY;
     if (hund > t->sd_colonies_paid) { sd_award(t, SD_CHORE * (hund - t->sd_colonies_paid)); t->sd_colonies_paid = hund; }
@@ -788,7 +789,7 @@ void progression_fresh(tank_t *t) {
     for (int i = 0; i < N_FISH_MAX; i++) s_starve_s[i] = 0;
     s_setup_pending = true;          /* a new tank: welcome, names, colours */
     s_newborn = -1;
-    s_sd_prev_feedings = 0; s_sd_pending = 0;   /* a fresh ledger (tank_init zeroed the tank's) */
+    s_sd_prev_feedings = 0; s_sd_pending = 0; s_sd_meal_wait = 0;   /* a fresh ledger (tank_init zeroed the tank's) */
     s_sale_need = 0;
     s_fry_seed = 0; s_fry_age = 0; s_fry_sold = 0;
     s_booted = true;
@@ -935,6 +936,7 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
         t->sh_snack_cool = sv.sh_snack_cool > 0 && sv.sh_snack_cool <= SH_SNACK_COOL_S ? sv.sh_snack_cool : 0;
     } else { t->sh_x = -1; t->sh_s = 0; t->sh_hitches = 0; t->sh_trust_passed = 0; t->sh_eaten = 0; t->sh_snack_pay = 0; t->sd_snacks_paid = 0; t->sh_snack_cool = 0; }
     s_sd_prev_feedings = t->player_feedings;         /* meals before this boot are not back-paid */
+    s_sd_meal_wait = 0;
     s_sd_pending = 0;
     s_arrival_pending = sv.arrival_pending; s_spawn_in = -1;
     s_sale_need = sv.sale_meals_need > 0 ? sv.sale_meals_need : 0;
@@ -962,6 +964,7 @@ void progression_settings_changed(void) { mark_dirty(); }
 void progression_slept(tank_t *t, float seconds) {
     if (seconds <= 0) return;
     tank_tick_sleep(t, seconds);
+    s_sd_meal_wait = fmaxf(0, s_sd_meal_wait - seconds);   /* the meal pay's wait runs through sleep */
     fry_age(t, seconds);                      /* the fry offer ages asleep too, in full */
     for (int i = 0; i < t->n_fish; i++) {     /* and they grew, slowly, in the dark */
         s_age[i] += seconds * SLEEP_GROWTH_FRAC;
@@ -1044,6 +1047,7 @@ void progression_tick(tank_t *t, float dt) {
         s_prev_trims = t->trims; s_prev_cleaned = t->cells_cleaned;
         mark_dirty();
     }
+    if (s_sd_meal_wait > 0) s_sd_meal_wait -= dt;
     sd_tick(t);                                  /* the sand dollars owed for all of the above */
 
     /* ravenous: a starving tank with empty water begs at the surface (tank.c

@@ -345,13 +345,20 @@ typedef struct {
     int8_t parent_a, parent_b;
 } fish_t;
 
-/* a pellet: it sinks ~43 s from the surface to the floor, then RESTS there
- * FOOD_FLOOR_S before it dissolves (2026-09-29, for the shrimp school - every
- * tank alike; measured: the fish's hunger is unchanged). floor_s = seconds on
- * the floor so far, nibbled = seconds of shrimp pecking (SHRIMP_PECK_S eats it). */
+/* a pellet: it sinks FOOD_SINK_PX_S from the surface to the floor (~43 s on
+ * the 1.8, ~60 on the watch), then RESTS there FOOD_FLOOR_S before it
+ * dissolves (2026-09-29, for the shrimp school - every tank alike; measured:
+ * the fish's hunger is unchanged). floor_s = seconds on the floor so far,
+ * nibbled = seconds of shrimp pecking (SHRIMP_PECK_S eats it). */
 typedef struct { float x, y, age; bool alive, from_player; float floor_s, nibbled; } food_t;
-#define FOOD_LIFE_S   45.0f          /* in the water: gone at this age if it never reached the floor */
-#define FOOD_FLOOR_Y  (TANK_BOT - 14)  /* where a pellet comes to rest */
+#define FOOD_FLOOR_Y   (TANK_BOT - 14)  /* where a pellet comes to rest */
+#define FOOD_SINK_PX_S 8.0f
+/* in the water: gone at this age if it never reached the floor - a cap that
+ * every pellet's fall fits under, the deepest drop on the glass plus a margin.
+ * (0.3.7: it was 45 s, the 1.8's fall; the watch's, the square's and the
+ * bowl's middle are 46-60 s, so pellets vanished mid-water there before the
+ * shrimp could reach them - a keeper on the watch, 2026-10-18) */
+#define FOOD_LIFE_S    (FOOD_FLOOR_Y / FOOD_SINK_PX_S + 5.0f)
 #define FOOD_FLOOR_S  15.0f          /* ... and how long it rests there (Strato, 2026-09-29) */
 
 /* the shrimp school (2026-09-29, the shop's sixth item, SD_ITEM_SHRIMP): cherry
