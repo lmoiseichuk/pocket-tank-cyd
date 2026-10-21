@@ -62,7 +62,7 @@ reset the chip before anyone read the log.
   deep-sleeps ([CYD.md](../CYD.md), *Sleep*). `-O2` throughout, assertions
   on, log level INFO - what upstream ships; no bring-up instrumentation. The
   model partition is the one flashed 2026-09-29 at the full reset. Its saved
-  data before each flash is in `~/src/dooing/pocket-tank-cyd-backup/`
+  data before each flash is in `~/src/dooing/device_backups/pocket-tank-cyd/`
   (`nvs_before_*`).
 - **IMU:** an MPU-6050 (GY-521-style) on the I2C socket, SDA IO16 / SCL IO15,
   0x68, **held flat against the back, pins toward the top edge** - not yet
