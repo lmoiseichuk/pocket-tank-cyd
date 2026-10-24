@@ -72,13 +72,15 @@ follows is how to reach each thing on this board, and where it differs.
 
 - **Tap a fish** for its stats card at the top left: the needs down the
   left, the traits and MORE down the right, and the toolbox under it. The
-  card goes by itself after 10 s; a tap on empty glass closes it.
+  arrow just right of the card steps it on to the next fish. The card goes
+  by itself after 10 s; a tap on empty glass closes it.
 - **Tap the card, or its MORE,** for the milestones page: a row per fish,
   the TANK row with the sand dollar at its left and your balance under the
   coin, and three buttons at the foot:
-  SETTINGS, UPGRADES and CLOSE.
-- **SETTINGS**, at the bottom left of the milestones page, opens the
-  settings page. **UPGRADES**, or the sand dollar, opens the shop.
+  UPGRADES, SETTINGS and CLOSE.
+- **UPGRADES**, at the bottom left of the milestones page, or the sand
+  dollar, opens the shop. **SETTINGS**, between it and CLOSE, opens the
+  settings page (the two swapped places in 0.3.9).
 - **CLOSE** on the settings page or the shop goes back to the milestones
   page; CLOSE on the milestones page goes back to the tank.
 
@@ -130,8 +132,9 @@ stage, what it is worth, and RENAME and SELL.
 
 UPGRADES on the milestones page, or the sand dollar on its TANK row. A row
 per item with its price and UNLOCK, lit once you can afford it and dim until
-then, or IN TANK once you own it; the arrows at the top right turn to the
-second page, and HOW TO EARN lists what pays.
+then, IN TANK once you own it, or ON THE SHELF with PUT BACK for a piece put
+away; the arrows at the top right turn to the next page, and HOW TO EARN
+lists what pays.
 
 Tap a row for the item's card: its picture, its words, its price, and
 UNLOCK, which buys it. A tap anywhere else closes the card.
@@ -139,19 +142,26 @@ UNLOCK, which buys it. A tap anywhere else closes the card.
 A plant or a decoration you buy comes up on its placement page, PLACE THE
 <ITEM>: drag it left or right along the floor, pick its DEPTH (BEHIND,
 AMONG or IN FRONT; some pieces offer two of the three), and DONE at the top
-right keeps it there. The coral adds a COLOR row and the reef cluster a
-LOOK row.
+right keeps it there. The arrows at the two ends of the DEPTH row move it
+behind or in front of the next piece at the same depth (the plant has
+none). The coral adds a COLOR row and the reef cluster a LOOK row.
 
-To move or sell it later, hold a still finger on the piece in the tank for
-a moment (0.7 s), and its placement page opens with SELL at the top left;
-or tap its row in the shop, whose card has MOVE and SELL. SELL takes two
-taps: the first shows the refund and OK?, the second sells.
+The page's top row is SELL, SHELVE, LOCK and DONE. SELL takes two taps: the
+first shows the refund and OK?, the second sells. SHELVE puts the piece away,
+kept as it is - a living one keeps growing on the shelf - and PUT BACK on
+its shop row returns it to its spot. LOCK (LOCKED once on) pins it: a held
+finger then passes it by.
+
+To move it later, hold a still finger on the piece in the tank for a moment
+(0.7 s) and its placement page opens; or tap its row in the shop, whose card
+has MOVE and SHELVE for a piece in the tank, PLACE and SELL for one on the
+shelf. A locked piece opens only from the shop.
 
 ### Settings
 
 | row | choices | what it does |
 |---|---|---|
-| BRIGHTNESS | 30% / 60% / 100% | the backlight, kept in NVS |
+| BRIGHTNESS | a slider, 5% to 100% in steps of 5 | the backlight follows the knob while a finger drags it, and is kept in NVS when the finger lifts |
 | VOLUME | OFF / QUIET / NORMAL | the sound, kept in NVS. "FISH ARE QUIET AT NIGHT" under it is upstream's note, not a row, and has been stale since 0.3.7: the light no longer changes the sound |
 | LIGHTS OUT | DOUBLE-TAP, or 5 SEC to 30 MIN | DOUBLE-TAP: the double-tap works the tank light. A time: the light goes out by itself after that long unhandled (*The light*) |
 | AUTO FEED | ON / OFF | ON: the tank feeds a fish that is really hungry. OFF: only you feed; a fish left starving in a lit tank slowly loses trust |
@@ -957,7 +967,24 @@ upstream's text but for one block.
    - an `#if` upstream puts around a function the fork has split into two
      branches can lose its `#endif` to the fork's: v0.3.4's `#if !TANK_WORN`
      around `set_lock_icon` in `common/render.c` merged unterminated, and
-     the simulator would not build.
+     the simulator would not build;
+   - a settings tap upstream adds takes the next free number, which is the
+     fork's: v0.3.9's `SET_TAP_BRIGHT_LIVE` came in as 10, `SET_TAP_FLIP`'s.
+     The fork's taps move up past it and the new one joins the static
+     assert in `common/render.h` that keeps them apart;
+   - the frame's byte order: since v0.3.9 tankcore builds every board with
+     `PT_FB_SWAP=1` (`common/render.h`), so the frame is already in the
+     panel's order and `display_port_spi.c` copies it out of PSRAM without
+     swapping. A port that swapped it again would scramble every colour,
+     and the simulator, built without it, would never show it;
+   - a scratch window upstream sizes for its own frames, which are 368 px
+     high or more: v0.3.9's shelf thumbnails draw into a window of the frame
+     up to 256 px square, 16 rows past the end of the CYD's 240, so
+     `SHELF_FULL` is `TANK_H` on a 320 x 240 board;
+   - upstream's selftests place pieces at fixed x on a 448 px floor: one
+     past where the CYD's 320 px floor clamps it fails as a spot that "did
+     not take". Give the CYD's share with `FLOOR_X()` or a branch of its
+     own in `sim/main.c`.
 
 3. **The simulator, in all five worlds:**
 
@@ -965,14 +992,17 @@ upstream's text but for one block.
    make -C sim check-all          # the 1.8, the round board, the watch, the square, then the 320 x 240
    ```
 
-   On Linux (glibc), upstream's round world fails `--selftest-tend` at the
-   two-fish hold from v0.3.5 (`f827ba8`) on - "the second fish to reach the
-   finger was not credited" - and upstream's own tree fails it the same way,
-   so `check-all` stops there and never runs the watch, the square or the
-   320 x 240. Run `make -C sim WATCH=1 check`, `SQUARE=1 check` and
-   `320X240=1 check` separately, the round board's other selftests by hand,
-   and compare its `--selftest-tend` output against upstream's worktree
-   (step 4). Remove this note once an upstream release passes it.
+   (From v0.3.5 to v0.3.8 the round world failed `--selftest-tend` on
+   Linux, in upstream's own tree too; v0.3.9 widened the two-fish hold's
+   window and it passes.)
+
+   Then the 320 x 240 world once more with the frame in the panel's byte
+   order, as the firmware builds it, and its pages against the plain
+   build's: every one must match byte for byte (`write_ppm` unswaps).
+
+   ```sh
+   make -C sim 320X240=1 OUT=fishsim-320x240-swap BUILD=build-320x240-swap EXTRA_CFLAGS=-DPT_FB_SWAP=1
+   ```
 
 4. **Upstream's four worlds against upstream's own tree.** Build upstream's
    simulator in a worktree of `upstream/main` (it needs its own `sim/lvgl`),
