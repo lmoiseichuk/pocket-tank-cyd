@@ -412,6 +412,10 @@ static void act(int a) {
     }
 }
 static bool newer(const update_manifest_t *m) { return m->release_num > (uint32_t)PT_RELEASE_NUM; }
+/* the save-format floor, in this build's packing: a manifest written before
+ * 0.3.8.1 packed three bytes (version.h), and 0x10000 is where four-byte
+ * numbers begin (0.1.0.0 would already be 0x00010000) */
+static uint32_t min_from_num(const update_manifest_t *m) { return m->min_from && m->min_from < 0x10000u ? m->min_from << 8 : m->min_from; }
 
 void update_tick(float dt) {
     if (s.step == STEP_NONE) return;
@@ -441,7 +445,7 @@ void update_tick(float dt) {
             if (strcmp(m->board, PT_BOARD) != 0)            /* another board's manifest (2026-10-02): never offered */
                 message("WRONG BOARD", "THIS UPDATE IS FOR", false, "ANOTHER BOARD. NOTHING CHANGED", NULL, 0, NULL, 0);
             else if (!newer(m)) { message("UP TO DATE", "YOUR TANK HAS THE LATEST", false, "VERSION", NULL, 0, NULL, 0); s.step = STEP_UP_TO_DATE; }
-            else if (m->needs_cable || (m->min_from && m->min_from > (uint32_t)PT_RELEASE_NUM))
+            else if (m->needs_cable || (min_from_num(m) && min_from_num(m) > (uint32_t)PT_RELEASE_NUM))
                 message("NEEDS THE CABLE", "THIS UPDATE IS INSTALLED", false, "FROM POCKETANK.COM/INSTALL", NULL, 0, NULL, 0);
             else go(STEP_OFFER, UPD_PG_OFFER);
         } else if (st == NET_FAILED) fail(net_port_fail_reason());

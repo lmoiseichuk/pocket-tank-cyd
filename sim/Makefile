@@ -42,7 +42,7 @@ OUT     := fishsim
 ROUNDF  :=
 endif
 
-CFLAGS  := $(ROUNDF) -O2 -std=c11 $(ARCH) -I. -I../common -I../common/llm -DLV_CONF_INCLUDE_SIMPLE -DSOUNDS_BIN='"../assets/sounds/sounds.bin"' -DPT_VERSION='"$(shell git describe --always --dirty --exclude='*' 2>/dev/null || echo sim)"' $(SDL_CFLAGS) \
+CFLAGS  := $(ROUNDF) $(EXTRA_CFLAGS) -O2 -std=c11 $(ARCH) -I. -I../common -I../common/llm -DLV_CONF_INCLUDE_SIMPLE -DSOUNDS_BIN='"../assets/sounds/sounds.bin"' -DPT_VERSION='"$(shell git describe --always --dirty --exclude='*' 2>/dev/null || echo sim)"' $(SDL_CFLAGS) \
            -Wall -Wextra -Wno-unused-parameter -MMD -MP
 LDFLAGS := $(ARCH) $(SDL_LIBS) -lm -lpthread
 
@@ -56,11 +56,11 @@ $(OUT): $(OBJS)
 
 SELFTESTS := --selftest --selftest-hunger --selftest-shop --selftest-battery \
              --selftest-pop --selftest-card --selftest-fry --selftest-sleep --selftest-tend --selftest-llm \
-             --selftest-saves --selftest-update
+             --selftest-saves --selftest-update --selftest-model --selftest-restore --selftest-grasscache --selftest-floor --selftest-stack
 # the dev repo does not track model/out (the public one does): NOMODEL=1 runs
 # the same checks without the LLM selftest, for a checkout with no model
 ifdef NOMODEL
-SELFTESTS := $(filter-out --selftest-llm,$(SELFTESTS))
+SELFTESTS := $(filter-out --selftest-llm --selftest-model,$(SELFTESTS))
 endif
 
 # `make check` tests the rectangle; `make ROUND=1 check` / `make WATCH=1 check` /

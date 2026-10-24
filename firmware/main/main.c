@@ -21,6 +21,7 @@
 #include "psram_plan.h"
 #include "display_port.h"
 #include "advisor_llm_esp.h"
+#include "advisor_core.h"
 #include "touch_port.h"
 #include "battery_port.h"
 #include "battery.h"
@@ -69,7 +70,9 @@
 static bool s_pmic;                        /* an AXP2101 answered: the PWR key exists, power-off is real */
 static bool s_rtc;                         /* an RTC chip answered: the wall clock survives a PMIC power-off. Without one
                                               (the round 1.75C) the night is a DEEP sleep - the ESP32's own clock keeps
-                                              the time - and only the PWR key's long press cuts the power */
+                                              the time - and only the PWR key's long press cuts the power. A chip that
+                                              STOPPED (no cell, the cable out) is still "yes": its time comes back the
+                                              clockless way (THE STOPPED CLOCK below) */
 #include "board_pins.h"
 #define PWR_SENSE ((gpio_num_t)board_pwr_sense_pin())   /* the round board and the watch: a line that is high while the PWR key is down */
 static bool pwr_sensed(void) { return board_pwr_sense_pin() >= 0; }
@@ -130,7 +133,29 @@ static bool llm_ok = false;
  * memcpy inside render_tank. */
 static async_memcpy_handle_t s_amc;
 static SemaphoreHandle_t s_amc_done;
-static bool s_prefetch_pending; static uint16_t *s_prefetch_fb; static unsigned s_prefetch_ep;
+static bool s_prefetch_pending; static uint16_t *s_prefetch_fb; static unsigned s_prefetch_ep;   /* (the whole-frame prefetch: retired 2026-10-23, below) */
+/* THE RESTORE (2026-10-23, in place of the whole-frame prefetch - the PSRAM
+ * bus is the wall on these boards, and the prefetch moved 920 KB over it a
+ * frame on the square): every frame marks the pixels it wrote (its buffer's
+ * TOUCHED mask, render.c); once the frame has left the wire the flush task
+ * copies just those words back from the scene (flush_done) and the buffer
+ * is primed for its next frame. A whole page says render_touch_all. */
+#define GRASS_CACHE_ON 0                                /* the back grass from a cached scene, refreshed every GRASS_CACHE_MS (2026-10-24; director `grasscache`) */
+#define GRASS_CACHE_MS 160
+#define USE_RESTORE 0                                   /* 0: the DMA prefetch (measured better on a grown tank); 1: the dirty restore */
+#define USE_FLUSH_TASK 0                                /* 0: the plain flush (2026-10-23: the task's CPU fill preempts the render - a wash; its GDMA
+                                                         * copies and a PSRAM-direct send were both slower than the fill); 1: the flush task */
+static uint32_t *s_touched[2]; static uint16_t *s_fbs[2];
+static SemaphoreHandle_t s_restored[2]; static bool s_restore_pending[2]; static unsigned s_restored_ep[2];
+static int64_t s_restore_us; static int s_restore_n;
+static void flush_done(const uint16_t *fb, void *arg) {     /* on the flush task (or here, after a plain flush) */
+    (void)arg;
+    int i = fb == s_fbs[1] ? 1 : 0;
+    int64_t t = esp_timer_get_time();
+    s_restored_ep[i] = s_touched[i] ? render_restore_touched((uint16_t *)fb, s_touched[i]) : 0;   /* (no masks: epoch 0 never matches - the whole scene is copied at the render) */
+    s_restore_us += esp_timer_get_time() - t; s_restore_n++;
+    xSemaphoreGive(s_restored[i]);
+}
 
 static bool amc_cb(async_memcpy_handle_t h, async_memcpy_event_t *ev, void *ctx) {
     (void)h; (void)ev; (void)ctx;
@@ -239,7 +264,7 @@ static int restore_fish(void) {
  * no option (Strato: the tanks must not drift apart). So with a saved Wi-Fi
  * network the night is the power-off, and the boot after it asks the internet
  * for the time (net_time_sync, a few seconds on a dark glass before the tank
- * exists). Kept in NVS:
+ * exists, 30 s at most since 0.3.9). Kept in NVS:
  *   "netclk" = 1 once a sync has put the clock on real time. The FIRST sync
  *     only re-bases the stand-in clock (seeded from the build time or a save):
  *     nothing is lived for that jump. After it, every gap between a save's
@@ -247,9 +272,29 @@ static int restore_fish(void) {
  *   "netok"  = the last try worked. Only then is the night a power-off (the
  *     network was there this morning); otherwise a deep sleep with the clock
  *     running, as before, and every wake tries again.
+ *   "netwhy" = why the last FAILED sync failed (net_time_why), kept past the
+ *     boots after it: the keeper's way round is Settings > Update, whose
+ *     restart would take this boot's story with it (0.3.9).
  * A failed sync after a power-off resumes the clock at the save (rtc_port_seed):
  * the stretch is owed, not lost - the clock now lags real time by exactly
- * that much, and the next good sync lives it through. */
+ * that much, and the next good sync lives it through.
+ * THE STOPPED CLOCK (2026-10-24; abumaia on Discord: "unplugging a tank that
+ * has no battery for 7+ hours doesn't count as a full night's sleep"). A
+ * board WITH a chip loses it just the same when nothing powers it - no cell,
+ * the cable out: the PCF85063 raises its stop flag. Until 0.3.8 the boot
+ * seeded BUILD TIME into it (older than any save: nothing lived, the night
+ * gone, the clock days wrong from then on) and never asked the internet,
+ * since the sync was the clockless board's alone. Now a stopped chip leaves
+ * the clock unset (rtc_port_init) and takes the 1.75C's path above: the
+ * internet lives the time away from the save, or the save's stamp resumes
+ * the clock with the stretch owed; whatever sets it goes back into the chip
+ * (rtc_port_store). For that to live the WHOLE night the chip must already
+ * be on real time, so a chip-board with a saved network also syncs ONCE
+ * while its chip runs ("netclk", the first boot of 0.3.9: the jump is the
+ * old build-time seed, nothing lived) - and gives up after NET_FIRST_TRIES
+ * failed mornings ("netgave"), never a page every morning for a network
+ * that is gone; a stopped chip asks regardless, it has to. */
+#define NET_FIRST_TRIES 3
 static int nvs_u8(const char *key, int dflt) {
     nvs_handle_t h; uint8_t v = (uint8_t)dflt;
     if (nvs_open("tank", NVS_READONLY, &h) == ESP_OK) { nvs_get_u8(h, key, &v); nvs_close(h); }
@@ -286,9 +331,13 @@ static void sync_worker(void *arg) {
     vTaskDelete(NULL);
 }
 static void net_clock_boot(uint16_t *fb) {  /* before the tank exists: the radio has the internal heap to itself */
-    if (s_rtc || !s_pmic || !net_saved()) return;
+    if (!s_pmic || !net_saved()) return;
     bool real = nvs_u8("netclk", 0), set = clock_port_now_unix() != 0, ok_before = nvs_u8("netok", 0);
-    if (real && set && ok_before) return;    /* a deep-sleep wake on a good clock: it ran all night */
+    if (real && set && ok_before) return;    /* a deep-sleep wake on a good clock, or a chip that ran all night */
+    if (s_rtc && set && !real) {             /* THE STOPPED CLOCK: a chip-board's one-time move onto real time, a few tries */
+        int gave = nvs_u8("netgave", 0);
+        if (gave >= NET_FIRST_TRIES) { snprintf(s_boot_sync, sizeof s_boot_sync, "not asked: %d failed tries, the chip keeps its own time", gave); return; }
+    }
     int64_t u = 0, at = 0;
     bool ok;
     s_sync_finished = false; s_sync_waiter = xTaskGetCurrentTaskHandle();
@@ -303,8 +352,11 @@ static void net_clock_boot(uint16_t *fb) {  /* before the tank exists: the radio
         u = s_sync_u; at = s_sync_at; ok = s_sync_ok;
     } else ok = net_time_sync(&u, &at);      /* no glass (or no task): ask in place */
     nvs_u8_put("netok", ok);
-    snprintf(s_boot_sync, sizeof s_boot_sync, "%s", ok ? "got the time" : "FAILED: no network or no answer");
+    if (s_rtc && set && !real) nvs_u8_put("netgave", ok ? 0 : nvs_u8("netgave", 0) + 1);
+    snprintf(s_boot_sync, sizeof s_boot_sync, "%s%s", ok ? "got the time" : "FAILED: ", ok ? "" : net_time_why());
     if (!ok) {
+        nvs_handle_t h;
+        if (nvs_open("tank", NVS_READWRITE, &h) == ESP_OK) { nvs_set_str(h, "netwhy", net_time_why()); nvs_commit(h); nvs_close(h); }
         ESP_LOGW(TAG, "clock: no time from the internet - %s; tonight is a deep sleep, the next wake asks again",
                  set ? "the clock runs on as it was" : "it resumes at the save, the stretch is owed");
         return;
@@ -313,6 +365,7 @@ static void net_clock_boot(uint16_t *fb) {  /* before the tank exists: the radio
     if (real) {
         int64_t was = clock_port_now_unix();
         struct timeval tv = { .tv_sec = (time_t)now }; settimeofday(&tv, NULL);
+        rtc_port_store();                    /* a chip that stopped (or lagged) runs on real time again */
         ESP_LOGI(TAG, "clock: set from the internet (%s) - the time away is lived through at this boot",
                  was ? "it had run on" : "it had stopped with the power");
         if (was) ESP_LOGI(TAG, "clock: it was %lld s %s", (long long)(now > was ? now - was : was - now), now >= was ? "behind (owed time, lived now)" : "ahead");
@@ -327,14 +380,21 @@ static void net_clock_rebase(void) {        /* after progression_boot / _wake: a
     if (!s_rebase_us) return;
     struct timeval tv = { .tv_sec = (time_t)(s_rebase_unix + (esp_timer_get_time() - s_rebase_us) / 1000000) };
     settimeofday(&tv, NULL);
+    rtc_port_store();                        /* a chip-board: the chip moves onto real time with the clock */
     nvs_u8_put("netclk", 1);
     s_rebase_us = 0;
+    progression_settings_changed();          /* the save stamps the new clock within SAVE_MIN_GAP_S: the one before it carries the
+                                                old clock (the no-cell 1.8's chip was 9 h behind, 2026-10-24) and a power cut
+                                                before the heartbeat would live that jump */
     ESP_LOGI(TAG, "clock: on real time from now on - nights can be a power-off");
 }
 void device_clock_log(void) {               /* director `clock` */
-    ESP_LOGI(TAG, "clock: this boot %s | lived at boot %.2f h | now %lld | RTC chip %s | network %s | real time %s | last sync %s | tonight: %s",
-             s_boot_sync, s_boot_lived_h, (long long)clock_port_now_unix(), s_rtc ? "yes" : "no", net_saved() ? "saved" : "none",
-             nvs_u8("netclk", 0) ? "yes" : "not yet", nvs_u8("netok", 0) ? "ok" : "failed or never",
+    char why[80] = "none"; size_t n = sizeof why;
+    nvs_handle_t h;
+    if (nvs_open("tank", NVS_READONLY, &h) == ESP_OK) { if (nvs_get_str(h, "netwhy", why, &n) != ESP_OK) snprintf(why, sizeof why, "none"); nvs_close(h); }
+    ESP_LOGI(TAG, "clock: this boot %s | lived at boot %.2f h | now %lld | RTC chip %s | network %s | real time %s | last sync %s | last failure: %s | tonight: %s",
+             s_boot_sync, s_boot_lived_h, (long long)clock_port_now_unix(), !s_rtc ? "no" : rtc_port_stopped() ? "yes, STOPPED at this boot (lost power)" : "yes", net_saved() ? "saved" : "none",
+             nvs_u8("netclk", 0) ? "yes" : "not yet", nvs_u8("netok", 0) ? "ok" : "failed or never", why,
              night_powers_off() ? "power-off" : "deep sleep, the clock running");
 }
 static void enter_sleep_for(int wake_after_s) {
@@ -932,6 +992,7 @@ static void tank_task(void *arg) {
         else if (ans < 0) ESP_LOGI(TAG, "reset prompt: tank kept");
         { int v = 0, w = touch_port_take_setting(&v);                 /* the settings page */
           if (w == SET_TAP_BRIGHT) brightness_set_level(v);
+          else if (w == SET_TAP_BRIGHT_LIVE) brightness_preview(v);   /* the slider's knob under the finger: the glass follows it */
           else if (w == SET_TAP_VOLUME) { audio_port_set_volume(v); if (v) audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE); }
           else if (w == SET_TAP_LIGHT) ESP_LOGI(TAG, "settings: lights out %s", v ? "AUTO (the idle rule)" : "MANUAL (double-tap the glass)");
           else if (w == SET_TAP_IDLE) ESP_LOGI(TAG, "settings: lights out after %d s still", v);
@@ -940,8 +1001,16 @@ static void tank_task(void *arg) {
           else if (w == SET_TAP_FLIP) orientation_set(v != 0);              /* the CYD's SCREEN row (no IMU) */
           else if (w == SET_TAP_SLEEP) sleep_setting_set(v); }              /* the 320x240 boards' SLEEP row: NEVER / SCREEN / LIGHT */
         if (touch_port_take_update() == UPD_TAP_CHECK) request_update();   /* the updates page's CHECK: save, restart into update mode */
-        { int r = touch_port_take_shop();                               /* the shop's UNLOCK / MOVE / SELL */
-          if (r >= SHOP_TAP_FRY) {                                      /* a fry bought (0.3.5): the shop closes, the birth flow welcomes it */
+        { int r = touch_port_take_shop();                               /* the shop's UNLOCK / MOVE / SELL / SHELVE / PUT BACK */
+          if (r >= SHOP_TAP_PLACE) {                                    /* back from the shelf (0.3.9): the placement page, its old spot in place */
+              int item = r - SHOP_TAP_PLACE;
+              if (progression_unshelve(&tank, item)) { audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE); touch_port_show_shop(false); setup_begin_place(&tank, item);
+                  ESP_LOGI(TAG, "shop: %s back from the shelf - placement page up", SD_ITEMS[item].name); }
+          } else if (r >= SHOP_TAP_SHELVE) {                            /* put away (0.3.9): the shop stays up, the row says ON THE SHELF */
+              int item = r - SHOP_TAP_SHELVE;
+              if (progression_shelve(&tank, item)) { audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE);
+                  ESP_LOGI(TAG, "shop: %s on the shelf (PUT BACK returns it)", SD_ITEMS[item].name); }
+          } else if (r >= SHOP_TAP_FRY) {                                      /* a fry bought (0.3.5): the shop closes, the birth flow welcomes it */
               int k = r - SHOP_TAP_FRY;
               if (progression_buy_fry(&tank, k)) { touch_port_show_shop(false);
                   ESP_LOGI(TAG, "shop: fry %d bought, %d sand dollars left, %d of %d left today", k, (int)tank.sd_balance, progression_fry_left(), FRY_OFFER_N); }
@@ -971,6 +1040,7 @@ static void tank_task(void *arg) {
         tank_tick(&tank, dt, llm_ok ? advisor_llm_esp : advisor_rules);
         progression_tick(&tank, dt);
         battery_frame(now);
+        if (llm_ok && advisor_core_damaged()) notice_model_damaged();   /* a decision's odds were not numbers (once per start) */
         notice_tick(&tank, dt, tank.ui_cover || setup_birth_due());   /* a fry's welcome first (2026-09-29) */
         { int cue = notice_take_cue(); if (cue >= 0) audio_port_play(cue, AUDIO_PITCH_ONE); }
         { static bool loop_on;                     /* the bubble loop rides the setup's placement page */
@@ -988,7 +1058,14 @@ static void tank_task(void *arg) {
         int64_t pf_wait = esp_timer_get_time(); tick_us += pf_wait - pf_tick;
         int64_t pf_tail = pf_wait;
         if (fb[cur]) {
-            if (s_prefetch_pending) {                       /* prior frame's scene prefetch */
+            if (USE_RESTORE) {
+                if (s_restore_pending[cur]) {               /* this buffer's last frame: the scene is back under it once it left the wire (flush_done) */
+                    xSemaphoreTake(s_restored[cur], portMAX_DELAY);
+                    s_restore_pending[cur] = false;
+                    render_fb_primed(fb[cur], s_restored_ep[cur]);
+                }
+                render_set_touched_mask(s_touched[cur]);
+            } else if (s_prefetch_pending) {                /* prior frame's scene prefetch */
                 xSemaphoreTake(s_amc_done, portMAX_DELAY);
                 s_prefetch_pending = false;
                 render_fb_primed(s_prefetch_fb, s_prefetch_ep);
@@ -1001,8 +1078,8 @@ static void tank_task(void *arg) {
                the scene while a page is up, so none is "primed": the first tank frame after the page copies the
                scene itself. */
             bool page = touch_port_milestones() || touch_port_settings() || touch_port_updates() || touch_port_shop();
-            if (page) render_fb_primed(NULL, 0);
-            else render_tank(&tank, fb[cur], TANK_W);
+            if (page && !USE_RESTORE) render_fb_primed(NULL, 0);
+            else if (!page) render_tank(&tank, fb[cur], TANK_W);
             touch_port_poll(&tank);          /* the CST816 is polled, not interrupt-
                                                 driven: extra samples inside the frame
                                                 keep quick finger taps from slipping
@@ -1032,6 +1109,7 @@ static void tank_task(void *arg) {
                 render_shop(&tank, fb[cur], TANK_W);
                 sel = -1;
             } else render_sd_toast(&tank, fb[cur], TANK_W);   /* the live tank: "+N" as dollars are earned */
+            if (page && USE_RESTORE) render_touch_all();   /* a whole page: the whole scene comes back under it */
             if (sel >= 0) render_stats_card(&tank, sel, fb[cur], TANK_W);   /* tapped fish: stats card (+ the pill) */
             {   /* the battery pill: with a card, while low, and a few seconds after the cable goes in;
                    the battery page (a tap on the pill) over the live tank in its place */
@@ -1060,13 +1138,22 @@ static void tank_task(void *arg) {
                into the idle framebuffer takes ~14 ms, and started after the flush it had only the
                tick and a 1 ms sleep to hide behind - the next frame waited ~9 ms for it. The flush
                only reads this frame's buffer; the copy rides alongside it. */
-            { uint16_t *next = fb[cur ^ 1];
-              const uint16_t *scene = render_scene_buf(&s_prefetch_ep);
-              if (!page && s_amc && scene && next && next != fb[cur] &&      /* (under a page the scene would only be painted over) */
-                  esp_async_memcpy(s_amc, next, (void *)scene, PLAN_FB_ALLOC, amc_cb, NULL) == ESP_OK) {
-                  s_prefetch_fb = next; s_prefetch_pending = true;
-              } }
-            display_port_flush(fb[cur]);
+            /* the frame leaves on the flush task while the next one renders (2026-10-23); once it has left, flush_done
+               puts the scene back under what it drew. Without the task: the plain flush, the restore here. */
+            if (!USE_RESTORE) {                             /* the next frame's scene prefetch starts BEFORE this frame's flush (2026-10-03): the copy
+                                                               into the idle framebuffer takes ~14 ms by DMA; it rides alongside the flush, which only
+                                                               reads this frame's buffer. (The restore, 2026-10-23: 12 ms of CPU a frame on the square
+                                                               where this costs none - the swaying grass touches ~60% of the words; kept for sparse tanks.) */
+                display_port_flush_wait(fb[cur ^ 1]);       /* the other buffer's flush (last frame's) must be over before the prefetch writes it */
+                uint16_t *next = fb[cur ^ 1];
+                const uint16_t *scene = render_scene_buf(&s_prefetch_ep);
+                if (!page && s_amc && scene && next && next != fb[cur] &&
+                    esp_async_memcpy(s_amc, next, (void *)scene, PLAN_FB_ALLOC, amc_cb, NULL) == ESP_OK) {
+                    s_prefetch_fb = next; s_prefetch_pending = true;
+                }
+                if (!USE_FLUSH_TASK || !display_port_flush_async(fb[cur], NULL, NULL)) display_port_flush(fb[cur]);
+            } else if (USE_FLUSH_TASK && display_port_flush_async(fb[cur], flush_done, NULL)) s_restore_pending[cur] = true;
+            else { display_port_flush(fb[cur]); flush_done(fb[cur], NULL); s_restore_pending[cur] = true; }
             touch_port_poll(&tank);
             pf_tail = esp_timer_get_time();
             render_us += t1 - t0; flush_us += pf_tail - t1; frames++;
@@ -1079,7 +1166,7 @@ static void tank_task(void *arg) {
                          fb[cur] ? fb[cur][(TANK_H / 2) * TANK_W + TANK_W / 2] : 0,
                          fb[cur] ? fb[cur][5 * TANK_W + 5] : 0,
                          sc ? sc[(TANK_H / 2) * TANK_W + TANK_W / 2] : 0, ep,
-                         (int)tank.night, (int)s_prefetch_pending);
+                         (int)tank.night, (int)(s_restore_pending[0] + s_restore_pending[1]));
                 ESP_LOGI("display", "%.1f fps | render %.1f ms flush %.1f ms | scene %.1f shafts %.1f veg %.1f fd/bub %.1f fish %.1f vig %.1f algae %.1f | card %.1f ms x%lu | veg %.2f %.2f %.2f",
                          frames * 1e6f / (float)(now - last_log),
                          render_us / 1e3f / frames, flush_us / 1e3f / frames,
@@ -1090,11 +1177,18 @@ static void tank_task(void *arg) {
                          card_frames ? card_us / 1e3f / card_frames : 0.0f, (unsigned long)card_frames,
                          tank.veg_growth[0], tank.veg_growth[1], tank.veg_growth[2]);
                 int64_t fw, fs; display_port_flush_prof(&fw, &fs);
+                { int64_t gu; int gn; render_grass_cache_prof(&gu, &gn); if (gn) ESP_LOGI("display", "grass cache: %d rebuilds, %.1f ms each", gn, gu / 1e3f / gn); }
+                if (s_restore_n) { ESP_LOGI("display", "restore: %.1f ms a frame x%d (on the flush task)", s_restore_us / 1e3f / s_restore_n, s_restore_n); s_restore_us = 0; s_restore_n = 0; }
+                { int64_t ft, fc; int ff; display_port_flush_async_prof(&ft, &ff, &fc);
+                  if (ff) ESP_LOGI("display", "flush task: %.1f ms a frame (copies %.1f, wire wait %.1f, send calls %.1f) x%d", ft / 1e3f / ff, fc / 1e3f / ff, fw / 1e3f / ff, fs / 1e3f / ff, ff); }
                 ESP_LOGI("display", "frame %.1f ms = polls %.1f + tick %.1f + prefetch wait %.1f + render %.1f + flush %.1f + tail %.1f + sleep %.1f | flush: fill %.1f, wire wait %.1f, send calls %.1f",
                          (float)(now - last_log) / 1e3f / frames, polls_us / 1e3f / frames, tick_us / 1e3f / frames, wait_us / 1e3f / frames,
                          render_us / 1e3f / frames, flush_us / 1e3f / frames, tail_us / 1e3f / frames, sleep_us / 1e3f / frames,
                          (flush_us - fw - fs) / 1e3f / frames, fw / 1e3f / frames, fs / 1e3f / frames);
                 card_us = 0; card_frames = 0;
+                ESP_LOGI("display", "the fish stage split: fish %.1f | snail+urchin %.1f | front pieces back %.1f | front grass %.1f | front overlays %.1f | front lanes %.1f | arch shade %.1f ms",
+                         render_prof_us[7] / 1e3f / frames, render_prof_us[8] / 1e3f / frames, render_prof_us[9] / 1e3f / frames, render_prof_us[10] / 1e3f / frames,
+                         render_prof_us[11] / 1e3f / frames, render_prof_us[12] / 1e3f / frames, render_prof_us[13] / 1e3f / frames);
                 memset(render_prof_us, 0, sizeof render_prof_us);
             }
             render_us = flush_us = 0; frames = 0;
@@ -1215,6 +1309,9 @@ void app_main(void) {
     assert_plan();
     for (int i = 0; i < PLAN_FB_COUNT; i++) {
         fb[i] = heap_caps_aligned_alloc(64, PLAN_FB_ALLOC, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (i < 2) { s_fbs[i] = fb[i]; s_restored[i] = xSemaphoreCreateBinary();
+                     s_touched[i] = heap_caps_malloc(RENDER_DIRTY_WORDS * 4, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);   /* the frame's touched mask (PSRAM: internal RAM is spoken for) */
+                     if (!s_touched[i]) ESP_LOGW(TAG, "no touched mask for fb %d: the whole scene is copied every frame", i); }
         if (!fb[i]) fb[i] = i ? fb[0] : NULL;          /* no PSRAM: share or skip */
     }
     if (!fb[0]) ESP_LOGW(TAG, "no framebuffer RAM: rendering disabled (tank still runs)");
@@ -1249,7 +1346,7 @@ void app_main(void) {
     else if (provision_mode_wanted()) provision_mode_run(fb[0]);   /* just installed, no network yet: the page's Wi-Fi step, the glass dark */
 #endif
     s_rtc = rtc_port_init(board_i2c_bus());   /* wall clock for the ravenous rule (before the clockless night's sync) */
-    net_clock_boot(fb[0]);            /* no RTC chip and a saved network: the time from the internet, before the advisor takes the heap */
+    net_clock_boot(fb[0]);            /* no RTC chip, a stopped one, or a chip not yet on real time, with a saved network: the time from the internet, before the advisor takes the heap */
     /* the advisor's hot buffers (~70 KB of internal SRAM, advisor_llm_esp.c)
        come before the discretionary caches below: the LLM is not optional */
     /* model: mmap the raw partition; weights are read through the flash cache */
@@ -1268,6 +1365,10 @@ void app_main(void) {
     /* static-scene cache: gradient/pebbles/reef drawn once per lighting state */
     uint16_t *scene = heap_caps_aligned_alloc(64, PLAN_FB_ALLOC, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (scene) render_set_scene_cache(scene); else ESP_LOGW(TAG, "no scene cache RAM: full redraw per frame");
+    { uint16_t *sg = scene ? heap_caps_aligned_alloc(64, PLAN_FB_ALLOC, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : NULL;   /* the grass cache (2026-10-24): the scene + the back grass */
+      uint32_t *bgm = sg ? heap_caps_malloc(RENDER_DIRTY_WORDS * 4, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : NULL;
+      if (sg && bgm) { render_set_grass_cache(sg, bgm); render_set_grass_cache_on(GRASS_CACHE_ON, GRASS_CACHE_MS); }
+      else ESP_LOGW(TAG, "grass cache: no PSRAM - the grass is drawn whole every frame"); }
     uint8_t *vig = heap_caps_malloc(TANK_W * TANK_H, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (vig) render_set_vignette_cache(vig);
     /* dirty mask (20 KB): internal SRAM if it fits - it is cleared and read
@@ -1329,13 +1430,17 @@ void app_main(void) {
                  h < 0 ? "no save or no clock, " : "", h < 0 ? 0.0f : h,
                  tank.n_fish ? tank.fish[0].hunger : 0.0f, battery_pct(), battery_port_vbat_mv());
         net_clock_rebase();
-        if (!s_rtc && clock_port_now_unix() == 0) rtc_port_seed(progression_loaded_unix());   /* a clockless board after a power cut: time resumes at the save */
+        if (clock_port_now_unix() == 0) {    /* a clockless board, or a chip that stopped, after a power cut with no time from the internet: time resumes at the save */
+            rtc_port_seed(progression_loaded_unix());
+            rtc_port_store();                /* the chip runs on from there; the stretch is owed until a sync pays it */
+        }
     }
     notice_sync(&tank);                      /* what is already earned stays unannounced */
     { uint32_t r = progression_loaded_release();   /* which release wrote the tank we just loaded */
       if (r) ESP_LOGI(TAG, "the save was written by v%d.%d.%d", (int)(r >> 16), (int)(r >> 8 & 255), (int)(r & 255));
       else ESP_LOGI(TAG, "the save predates release numbers (or there was none)");
       if (r && r < (uint32_t)PT_RELEASE_NUM) notice_updated();   /* the first boot of a new release: its card, once (the next save stamps this release) */ }
+    if (model_trailer_unknown_body()) notice_model_damaged();   /* a model body we never shipped (2026-10-21) */
     /* the save loaded under this image: it is good - the bootloader's
        rollback (a fresh image boots "pending" once) stands down. Before the
        first save write, so an older build never meets a newer save it

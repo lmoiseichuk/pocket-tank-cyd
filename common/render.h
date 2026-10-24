@@ -50,7 +50,23 @@ void render_tank(const tank_t *t, uint16_t *fb, int stride);
  * bubbles, 4 fish + front veg, 5 vignette sweep, 6 algae film). Accumulates
  * until the caller zeroes it. NULL = off. */
 extern int64_t (*render_clock_us)(void);
-extern int64_t render_prof_us[7];
+/* THE FRAMEBUFFER'S BYTE ORDER (2026-10-23, the frame rate on the big glasses): with PT_FB_SWAP the frame (and the
+ * scene it is primed from) holds every pixel as the panel's wire wants it - RGB565 high byte first, i.e. byte-swapped
+ * as a little-endian uint16 - so the SPI DMA can take the frame straight from PSRAM, and the flush's CPU fill (19 ms
+ * a frame on the square: the read out of PSRAM, the swap, the stripes) goes away. Every store into a frame or the
+ * scene goes through FB_SWAP16, every load back; rgb565() and the colour math stay native. The sim builds with it
+ * off (its pixel tests read the frame); `make OUT=fishsim-swap BUILD=build-arm-swap EXTRA_CFLAGS=-DPT_FB_SWAP=1`
+ * builds it on, and its frames must match the plain build's byte for byte (write_ppm unswaps). */
+#ifndef PT_FB_SWAP
+#define PT_FB_SWAP 0
+#endif
+#if PT_FB_SWAP
+#define FB_SWAP16(v) ((uint16_t)((((uint16_t)(v)) << 8) | (((uint16_t)(v)) >> 8)))
+#else
+#define FB_SWAP16(v) ((uint16_t)(v))
+#endif
+extern int64_t render_prof_us[14];   /* 0..6 the stages; 7..13 the fish stage split (2026-10-23): the fish, the snail + urchin,
+                                      * the pieces IN FRONT restored, the front grass, the front overlays, the front lanes, the arch shade */
 
 /* Optional static-scene cache (TANK_W*TANK_H uint16): the water gradient,
  * pebbles and backdrop decor are rendered once per lighting state and copied each
@@ -104,6 +120,10 @@ void render_fb_primed(const uint16_t *fb, unsigned epoch);
  * it and a centred card: the seahorse at 2x, its days with the keeper, its
  * hitches, the trust it passed on and what it is doing. */
 #define RENDER_CARD_SEAHORSE 96
+/* fish_idx == RENDER_CARD_CRAB (0.3.9): the strawberry crab's card - a ring on
+ * it and a centred card: the crab facing the glass at 2x, the pellets it has
+ * found and what it is doing. */
+#define RENDER_CARD_CRAB 95
 void render_stats_card(const tank_t *t, int fish_idx, uint16_t *fb, int stride);
 /* Optional card cache (RENDER_CARD_W x RENDER_CARD_H uint16): with the scene
  * cache live, the card is redrawn at most 4x/s and blitted otherwise (~7 ms
@@ -169,11 +189,27 @@ int  render_tools_hit(float x, float y);
  * double edge on a lighter fill - and the shackle's shape says it too,
  * never the hue alone. render_lock_hit is its tap test while a fish's card
  * is up: its column, from the toolbox's top edge down to the bezel. */
-#define RENDER_LOCK_X (RENDER_TOOLS_X + RENDER_TOOLS_W + RENDER_CARD_HIT_SIDE)
+#define RENDER_SIDE_GAP 6          /* the lock off the toolbox and the NEXT arrow off the card: one gap (0.3.9; the lock was 12) */
+#define RENDER_LOCK_X (RENDER_TOOLS_X + RENDER_TOOLS_W + RENDER_SIDE_GAP)
 #define RENDER_LOCK_W 44
 #define RENDER_LOCK_H 44
 #define RENDER_LOCK_Y (RENDER_TOOLS_Y + (RENDER_TOOLS_H - RENDER_LOCK_H) / 2)
 bool render_lock_hit(float x, float y);
+/* the NEXT FISH arrow (0.3.9, Bananna on Discord: "sometimes fish hide
+ * behind the stat screen"): a small box just outside the card's top right,
+ * in the lock's dress, one arrow; a tap steps the card on to the next fish
+ * (wrapping round). Dim with a single fish, where there is nowhere to go.
+ * render_next_hit is its tap test while a fish's card is up - the box plus
+ * slop, most of it right and below; the platforms test it BEFORE the card's
+ * own (RENDER_CARD_HIT's side slop reaches past the gap). A tap on it never
+ * reaches the water, dim or not. render_next_fish is the fish it steps to
+ * (the same one with a single fish). */
+#define RENDER_NEXT_W   34
+#define RENDER_NEXT_H   34
+#define RENDER_NEXT_X   (RENDER_CARD_X + RENDER_CARD_W + RENDER_SIDE_GAP)
+#define RENDER_NEXT_Y   RENDER_CARD_Y
+bool render_next_hit(float x, float y);
+int  render_next_fish(const tank_t *t, int fish_idx);
 /* With a tool in hand and no fish card up, a chip at the top left says so:
  * the tool and DONE. A tap on it (render_tool_chip_hit) puts the tool back
  * in the box. render_tool_chip draws nothing with TOOL_HAND, when
@@ -283,7 +319,13 @@ void render_milestones_leave(void);
  * SHOP_TAP_KEPT when a modal opened or closed. Page state is render-local;
  * render_shop_leave clears it when the page closes. */
 enum { SHOP_TAP_NONE = 0, SHOP_TAP_KEPT = 1, SHOP_TAP_CLOSE = 2, SHOP_TAP_BUY = 16, SHOP_TAP_MOVE = 32, SHOP_TAP_SELL = 64,
-       SHOP_TAP_FRY = 128 };   /* BUY / MOVE / SELL + item index; FRY + the fry's place in the offer (0.3.5) */
+       SHOP_TAP_FRY = 128, SHOP_TAP_SHELVE = 256, SHOP_TAP_PLACE = 512 };   /* BUY / MOVE / SELL / SHELVE / PLACE + item index; FRY + the fry's place in the offer (0.3.5) */
+/* SHOP_TAP_SHELVE / SHOP_TAP_PLACE (0.3.9, the decoration shelf): a piece in
+ * the tank has MOVE | SHELVE in its modal (SELL moved to the placement page);
+ * SHELVE puts it away (progression_shelve) and the shop stays up - its row
+ * now says ON THE SHELF with a PUT BACK button, and its modal PLACE | SELL.
+ * PUT BACK / PLACE return SHOP_TAP_PLACE + item: the platform unshelves it
+ * and opens the placement page with the kept spot in place. */
 /* THE FRY (0.3.5, progression_fry_*): once a fish has been sold the shop's
  * first row is FRY - the first fry still for sale at its left, the price,
  * CHOOSE (SOLD OUT with all three bought, FULL with no slot). Its modal
@@ -300,6 +342,9 @@ enum { SHOP_TAP_NONE = 0, SHOP_TAP_KEPT = 1, SHOP_TAP_CLOSE = 2, SHOP_TAP_BUY = 
 void render_shop(const tank_t *t, uint16_t *fb, int stride);
 int  render_shop_tap(const tank_t *t, float x, float y);
 void render_shop_leave(void);
+/* the tests: piece `item` painted pixel (x, y) in the last render_tank (its
+ * recorded silhouette; the castle's static one) */
+bool render_decor_covers(int item, int x, int y);
 int  render_coral_cells(float growth);   /* the coral sprite's filled cells at a growth (the sim's selftest) */
 int  render_cluster_cells(float growth); /* the reef cluster's, likewise */
 /* the decor scratch (2026-09-24): the coral's and the cluster's tables in one
@@ -309,7 +354,28 @@ size_t render_decor_scratch_size(void);
 /* the pumpkin lantern (0.3.6, SD_ITEM_PUMPKIN): its sprite's pixels, and
  * in *glow the ones redrawn every frame (the face + the flame) */
 int    render_pumpkin_px(int *glow);   /* its pixels; *glow = the ones redrawn every frame */
+/* the touched mask and the restore (2026-10-23; render.c "The TOUCHED mask"): the firmware keeps a mask per framebuffer
+ * (RENDER_DIRTY_WORDS words), hands the frame's over before render_tank, says when a frame is a whole page
+ * (render_touch_all), and once the frame has left the wire puts the scene back under it (render_restore_touched: the
+ * epoch it returns primes the buffer, render_fb_primed) */
+void     render_set_touched_mask(uint32_t *buf);
+/* the grass cache (2026-10-24, render.c "THE GRASS CACHE"): a scene-sized buffer and a RENDER_DIRTY_WORDS mask, then on/off and
+ * its period; the prof gives the refreshes' time and count since the last call */
+void     render_set_grass_cache(uint16_t *buf, uint32_t *mask);
+void     render_set_grass_cache_on(bool on, int period_ms);
+bool     render_grass_cache_on(void);
+int      render_grass_cache_ms(void);
+void     render_grass_cache_prof(int64_t *us, int *n);
+void     render_set_veg_step(int s);   /* the grass in row pairs (2): about half the spans, 2 px steps on its edges; 1 = row by row */
+int      render_veg_step(void);
+void     render_veg_bench(const tank_t *t, uint16_t *fb, int bed, int64_t (*clock_us)(void), int64_t *full_us, int64_t dry_us[3], int *spans);   /* director `vegbench`: full, no stores, no stores + no vignette, no span_final at all */
+void     render_touch_all(void);
+unsigned render_restore_touched(uint16_t *fb, const uint32_t *touched);
+unsigned render_scene_epoch(void);
 void   render_set_pumpkin_hidden(bool hidden);   /* the frame-rate A/B (director `pumpkin off`): not drawn, no light */
+/* the bubble volcano (0.3.9, SD_ITEM_VOLCANO) */
+void   render_set_volcano_style(int style);   /* 0 stacked boulders (the tank's), 1 smooth rock (the sim's look, PT_VOLCANO_SMOOTH) */
+int    render_volcano_px(int *glow);   /* its pixels; *glow = the lava's, redrawn every frame */
 bool   render_pumpkin_hidden(void);
 void   render_set_decor_scratch(void *buf);
 /* the sand dollar toast: dollars awarded during play (progression_sd_take_award)
@@ -338,8 +404,11 @@ void render_confirm_reset(uint16_t *fb, int stride, float frac);
 int  render_confirm_hit(float x, float y);
 
 /* Settings page (2026-09-15; the brightness row left the milestones page
- * for it): BRIGHTNESS 30 / 60 / 100 % and VOLUME OFF / QUIET / NORMAL as
- * segment buttons - tap the one you want - then LIGHTS OUT, one row since
+ * for it): BRIGHTNESS, a slider since 0.3.9 (a keeper sensitive to light
+ * found 30 %, the lowest of the three buttons it had, too bright): a knob
+ * carrying the percent, 5 .. 100 % in steps of 5, dragged along the row or
+ * tapped where wanted; VOLUME OFF / QUIET / NORMAL as segment buttons - tap
+ * the one you want - then LIGHTS OUT, one row since
  * 0.3.2 (Strato: "takes up too much real estate ... condense it and give a
  * few options"): a value between two arrows, DOUBLE-TAP (MANUAL, the default:
  * the keeper's double-tap on the glass) and then AUTO after 5 SEC .. 30 MIN
@@ -352,7 +421,9 @@ int  render_confirm_hit(float x, float y);
  * The platform feeds render_settings_touch EVERY FRAME while the page is up
  * (x, y, finger down), as it feeds setup_touch: it classifies the taps,
  * applies the tank's own settings to the tank itself (and marks the save),
- * and returns what happened: SET_TAP_BRIGHT with *value = the percent,
+ * and returns what happened: SET_TAP_BRIGHT with *value = the percent
+ * (the finger lifted off the slider: keep it), SET_TAP_BRIGHT_LIVE (the
+ * knob moved under a finger still down: show it, do not save it yet),
  * SET_TAP_VOLUME 0..2 (those two are the platform's to apply),
  * SET_TAP_LIGHT (the row stepped to or from MANUAL: *value 1 = AUTO),
  * SET_TAP_IDLE (AUTO's time stepped: *value = the seconds now set),
@@ -367,11 +438,13 @@ enum { SET_TAP_NONE = 0, SET_TAP_CLOSE = 1, SET_TAP_BRIGHT = 2, SET_TAP_VOLUME =
                                    for the save - the platform only logs it (the picture turns on the next frame) */
        SET_TAP_FEED = 8,        /* AUTO FEED (0.3.2): *value 1 = ON; applied and marked for the save */
        SET_TAP_ROTATE = 9,      /* ROTATION (0.3.2): *value 1 = locked; applied and marked for the save */
-       SET_TAP_FLIP = 10,       /* this fork, a 320x240 board with no IMU turning the picture: SCREEN UPRIGHT / FLIPPED (below) */
-       SET_TAP_SLEEP = 11 };    /* this fork, a 320x240 board not built for deepsleep: SLEEP NEVER / SCREEN / LIGHT (below) */
+       SET_TAP_BRIGHT_LIVE = 10,  /* the BRIGHTNESS slider under a finger (0.3.9): *value = the percent, the panel's to
+                                       show now; SET_TAP_BRIGHT follows with the last one when the finger lifts */
+       SET_TAP_FLIP = 11,       /* this fork, a 320x240 board with no IMU turning the picture: SCREEN UPRIGHT / FLIPPED (below) */
+       SET_TAP_SLEEP = 12 };    /* this fork, a 320x240 board not built for deepsleep: SLEEP NEVER / SCREEN / LIGHT (below) */
 /* (this fork) the platforms test these in if-chains, not a switch, so two
    equal values would compile without a word: the fork's stay past upstream's */
-_Static_assert(SET_TAP_FLIP > SET_TAP_ROTATE && SET_TAP_FLIP > SET_TAP_SCREEN && SET_TAP_FLIP > SET_TAP_UPDATES && SET_TAP_SLEEP > SET_TAP_FLIP,
+_Static_assert(SET_TAP_FLIP > SET_TAP_BRIGHT_LIVE && SET_TAP_FLIP > SET_TAP_ROTATE && SET_TAP_FLIP > SET_TAP_SCREEN && SET_TAP_FLIP > SET_TAP_UPDATES && SET_TAP_SLEEP > SET_TAP_FLIP,
                "the fork's settings taps must not reuse upstream's numbers");
 /* The 320x240 boards' own rows (this fork; no other board draws them). With
  * no IMU to turn the picture - the CYD without its breakout, the Touch-LCD-2,
@@ -431,6 +504,8 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
 #define SHRIMP_CARD_H UI(190)
 #define URCHIN_CARD_W UI(336)
 #define URCHIN_CARD_H UI(194)
+#define CRAB_CARD_W UI(336)          /* the strawberry crab's (0.3.9): the urchin's size */
+#define CRAB_CARD_H UI(194)
 #define SEAHORSE_CARD_W UI(336)
 #define SEAHORSE_CARD_H UI(188)
 /* the milestones page (the bowl has its own rows and buttons: render.c) */
@@ -468,7 +543,7 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
 #else
 #define MSP_CLOSE_X   324               /* the CLOSE button, bottom right, inside the bezel curve; clear of the brightness row's number */
 #define MSP_CLOSE_Y   312
-#define MSP_SET_X     32                /* the SETTINGS button, bottom left, where the brightness row was */
+#define MSP_SET_X     178               /* the SETTINGS button, between UPGRADES and CLOSE (Strato, 2026-10-24: the two swapped places; it was bottom left) */
 #define MSP_SET_Y     MSP_CLOSE_Y
 #define SHP_CLOSE_X   MSP_CLOSE_X
 #define SET_CLOSE_X   MSP_CLOSE_X
@@ -477,7 +552,7 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
 #ifdef TANK_ROUND
 #define MSP_UPG_X     114
 #else
-#define MSP_UPG_X     178               /* the UPGRADES button, centred between SETTINGS and CLOSE: the shop too (Strato, 2026-09-15) */
+#define MSP_UPG_X     32                /* the UPGRADES button, bottom left where the brightness row was: the shop (centred between the others until 2026-10-24) */
 #endif
 #define MSP_UPG_W     116
 #define MSP_MODAL_X   56
@@ -528,7 +603,7 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
 #define SHP_MODAL_H   244
 #define SHP_EARN_MODAL_Y 40
 /* the caption under the rows sits SHP_BTN_H + 12 under the last row (the third row, the castle, 2026-09-16: it used to be fixed at 224 / 244 and the castle's row ran into it) */
-#define SHP_EARN_MODAL_H 248        /* seven lines since the seahorse's snack (0.3.6) */
+#define SHP_EARN_MODAL_H 272        /* eight lines since the crab's find (0.3.9; seven since the seahorse's snack) */
 #define SHP_TWO_GAP 16               /* MOVE and SELL side by side in the modal */
 #define SHP_TWO_X0  (SHP_MODAL_X + (SHP_MODAL_W - 2 * MSP_HOW_W - SHP_TWO_GAP) / 2)
 #define SHP_TWO_X1  (SHP_TWO_X0 + MSP_HOW_W + SHP_TWO_GAP)
@@ -560,7 +635,7 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
 #define SET_FOOT_Y    392            /* UPDATES and CLOSE */
 #else
 #define SET_TITLE_Y   14
-#define SET_ROW1_Y    58             /* BRIGHTNESS */
+#define SET_ROW1_Y    58             /* BRIGHTNESS: the slider */
 #define SET_ROW2_Y    108            /* VOLUME */
 #define SET_NOTE_Y    146            /* "FISH ARE QUIET AT NIGHT" */
 #define SET_ROW3_Y    176            /* LIGHTS OUT */
@@ -580,6 +655,15 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
 #define SET_ARW_W     40
 #define SET_SPAN_W    (2 * SET_SEG_DX + SET_SEG_W)
 #define SET_SPAN_MID  (SET_SEG_X + SET_SPAN_W / 2)
+/* BRIGHTNESS (0.3.9): a slider across the same span - a rail, lit up to a
+ * knob that carries the percent; the knob's centre runs SET_BRT_X0 .. X1 for
+ * SET_BRT_MIN .. 100 % in steps of SET_BRT_STEP */
+#define SET_BRT_MIN   5
+#define SET_BRT_STEP  5
+#define SET_KNOB_W    60
+#define SET_BRT_X0    (SET_SEG_X + SET_KNOB_W / 2)
+#define SET_BRT_X1    (SET_SEG_X + SET_SPAN_W - SET_KNOB_W / 2)
+#define SET_BRT_X(pct) (SET_BRT_X0 + ((pct) - SET_BRT_MIN) * (SET_BRT_X1 - SET_BRT_X0) / (100 - SET_BRT_MIN))
 /* ROTATION: one icon button where the first segment stands, its word beside it */
 #define SET_ROT_WORD_X (SET_SEG_X + SET_SEG_W + 14)
 #define SET_UPD_W     112
@@ -651,11 +735,11 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
 #undef  MSP_CLOSE_H
 #define MSP_CLOSE_H   22
 #undef  MSP_SET_X
-#define MSP_SET_X     CYD_GLASS_X(8)
+#define MSP_SET_X     CYD_GLASS_X(112)  /* SETTINGS between UPGRADES and CLOSE, UPGRADES bottom left (upstream swapped them in 0.3.9) */
 #undef  MSP_SET_W
 #define MSP_SET_W     96
 #undef  MSP_UPG_X
-#define MSP_UPG_X     CYD_GLASS_X(112)
+#define MSP_UPG_X     CYD_GLASS_X(8)
 #undef  MSP_UPG_W
 #define MSP_UPG_W     96
 #undef  MSP_TPG_X
@@ -737,7 +821,7 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
 #undef  SHP_EARN_MODAL_Y
 #define SHP_EARN_MODAL_Y UI(40)
 #undef  SHP_EARN_MODAL_H
-#define SHP_EARN_MODAL_H UI(248)     /* seven lines since the seahorse's snack (v0.3.6) */
+#define SHP_EARN_MODAL_H UI(272)     /* eight lines since the crab's find (v0.3.9; seven since the seahorse's snack) */
 #undef  SHP_TWO_GAP
 #define SHP_TWO_GAP   UI(16)
 /* the fry modal's three boxes (v0.3.6's sync): upstream's 3 x 100 + 2 x 10 is
@@ -794,6 +878,8 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
 #define SET_SEG_Y(row) ((row) - 8)   /* the segment sits on the label's line */
 #undef  SET_ARW_W
 #define SET_ARW_W     UI(40)
+#undef  SET_KNOB_W
+#define SET_KNOB_W    UI(60)         /* the BRIGHTNESS slider's knob (v0.3.9): upstream's 60 is a third of this rail */
 #undef  SET_ROT_WORD_X
 #define SET_ROT_WORD_X (SET_SEG_X + SET_SEG_W + UI(14))
 _Static_assert(MSP_CLOSE_Y + MSP_CLOSE_H <= TANK_H && SET_SEG_Y(SET_ROW6_Y) + SET_SEG_H < MSP_CLOSE_Y,

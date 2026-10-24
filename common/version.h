@@ -20,10 +20,20 @@
 
 #define PT_RELEASE_MAJOR 0
 #define PT_RELEASE_MINOR 3
-#define PT_RELEASE_PATCH 8
-#define PT_RELEASE       "0.3.8"
+#define PT_RELEASE_PATCH 9
+#define PT_RELEASE_HOTFIX 0                    /* a fourth part (2026-10-21): a fix between patches - 0.3.8.1 - that
+                                                  must not burn the next number. 0 = none, and the string has three parts */
+#define PT_RELEASE       "0.3.9"
 #define PT_RELEASE_STAGE "alpha"               /* pre-1.0: shown beside the number */
-#define PT_RELEASE_NUM   ((PT_RELEASE_MAJOR << 16) | (PT_RELEASE_MINOR << 8) | PT_RELEASE_PATCH)
+/* the packed number the tank compares (update.c newer(), the save's stamp):
+ * a byte each, major.minor.patch.hotfix. Until 0.3.8 it was three bytes
+ * (major << 16 | minor << 8 | patch): every four-byte number is larger than
+ * every three-byte one, so a tank on 0.3.8 (0x000308) sees 0.3.8.1
+ * (0x00030801) as newer, and 0.3.9 (0x00030900) ranks above both. A manifest's
+ * min_from under 0x10000 is read as the old packing (update.c). Any line that
+ * merges this forward (0.4) takes the four bytes with it, or its 0.4.0 would
+ * rank below 0.3.8.1. tools/make_ota_manifest.py packs the same way. */
+#define PT_RELEASE_NUM   ((PT_RELEASE_MAJOR << 24) | (PT_RELEASE_MINOR << 16) | (PT_RELEASE_PATCH << 8) | PT_RELEASE_HOTFIX)
 
 /* the model this build ships with (model/out/model_q4.bin): its tag, byte
  * length and sha256. The tank's model trailer (firmware/main/model_trailer.c)

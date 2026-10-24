@@ -95,11 +95,86 @@ static inline void bb_add(int x0, int x1, int y) {
     if (y < g_bb_y0) g_bb_y0 = y;
     if (y > g_bb_y1) g_bb_y1 = y;
 }
+/* The TOUCHED mask (2026-10-23, the frame rate on every board): one bit per
+ * pixel the frame WROTE over the baked scene - every writer marks it, in the
+ * FRAME's coordinates (a page's ctx has its own origin), never held, final
+ * stores included. It is what puts the scene back under the frame once it
+ * has left the wire (render_restore_touched: the touched words copied from
+ * the scene), in place of the whole-frame prefetch that moved 920 KB over
+ * the PSRAM bus every frame on the square - the bus, not the CPU, is the
+ * wall on these boards. The firmware keeps one per framebuffer and hands
+ * the frame's over before render_tank (render_set_touched_mask); a frame
+ * that is a whole page says so (render_touch_all). The sim's
+ * --selftest-restore draws through this path against a whole re-prime and
+ * fails on any ghost. */
+static uint32_t *g_touched;
+void render_set_touched_mask(uint32_t *buf) { g_touched = buf; }
+static inline void touch_span_f(int x0, int x1, int y) {          /* frame coordinates */
+    if (!g_touched || (unsigned)y >= (unsigned)TANK_H) return;
+    if (x0 < 0) x0 = 0;
+    if (x1 > TANK_W - 1) x1 = TANK_W - 1;
+    if (x0 > x1) return;
+    uint32_t *row = g_touched + y * DIRTY_WORDS_PER_ROW;
+    int w0 = x0 >> 5, w1 = x1 >> 5;
+    if (w0 == w1) { row[w0] |= (0xFFFFFFFFu >> (31 - (x1 & 31))) & (0xFFFFFFFFu << (x0 & 31)); return; }
+    row[w0] |= 0xFFFFFFFFu << (x0 & 31);
+    for (int w = w0 + 1; w < w1; w++) row[w] = 0xFFFFFFFFu;
+    row[w1] |= 0xFFFFFFFFu >> (31 - (x1 & 31));
+}
+static inline void touch_px_f(int x, int y) {
+    if (g_touched && (unsigned)x < (unsigned)TANK_W && (unsigned)y < (unsigned)TANK_H) g_touched[y * DIRTY_WORDS_PER_ROW + (x >> 5)] |= 1u << (x & 31);
+}
+#define TOUCH_SPAN(c, x0, x1, y) touch_span_f((x0) - (c)->ox, (x1) - (c)->ox, (y) - (c)->oy)
+#define TOUCH_PX(c, x, y)        touch_px_f((x) - (c)->ox, (y) - (c)->oy)
+void render_touch_all(void) { if (g_touched) memset(g_touched, 0xff, (size_t)RENDER_DIRTY_WORDS * 4); }
+/* THE GRASS CACHE (2026-10-24, Strato: "keep the back grass in a cached scene
+ * that updates a few times a second"). The grass was a third of a full frame
+ * (27 ms on the square), and its sway is slow - a frond's tip moves under 4 px
+ * a second. So the BACK half of it (the beds behind the fish and the even
+ * fronds of the woven beds) is painted into a copy of the scene, g_sceneg,
+ * at most every g_sg_period seconds; frames are primed from that copy and
+ * draw only the front fronds live. The pieces behind the grass that animate
+ * every frame (a crown's tentacles, the candle, the lava and the volcano's
+ * bubbles) must stay UNDER it: the cache records which pixels the back grass
+ * covers (g_bgmask) and those overlays skip them (g_under). A scene rebake,
+ * a placement page or a page in between: the frame draws its grass as before
+ * and the cache is rebuilt at its end. Off unless the platform hands over the
+ * buffers and turns it on (director `grasscache`, the sim's PT_GRASS_CACHE). */
+static uint16_t *g_sceneg;                     /* the scene + the back grass */
+static uint32_t *g_bgmask;                     /* the back grass's pixels in it (RENDER_DIRTY_WORDS) */
+static bool      g_sg_on;
+static float     g_sg_period = 0.16f;
+static bool      g_sg_ok;
+static unsigned  g_sg_scene_ep, g_sg_ep = 1;
+static float     g_sg_clock;
+static int       g_sg_top = 0;                 /* the highest row the cached grass touched */
+static const uint32_t *g_under;                /* while the overlays behind are drawn: pixels to leave alone */
+static bool      g_bg_rec;                     /* while the cache's grass is painted: record into g_bgmask */
+static int64_t   g_sg_us; static int g_sg_n;   /* the refreshes' cost (the director's line) */
+void render_set_grass_cache(uint16_t *buf, uint32_t *mask) { g_sceneg = buf; g_bgmask = mask; g_sg_ok = false; }
+void render_set_grass_cache_on(bool on, int period_ms) { bool was = g_sg_on; g_sg_on = on && g_sceneg && g_bgmask; if (period_ms > 0) g_sg_period = period_ms / 1000.0f; if (!was || !g_sg_on) g_sg_ok = false; }   /* (a new period alone keeps the cache) */
+bool render_grass_cache_on(void) { return g_sg_on; }
+int  render_grass_cache_ms(void) { return (int)(g_sg_period * 1000 + 0.5f); }
+void render_grass_cache_prof(int64_t *us, int *n) { *us = g_sg_us; *n = g_sg_n; g_sg_us = 0; g_sg_n = 0; }
+static inline bool under_bg(int x, int y) {
+    return g_under && (unsigned)x < (unsigned)TANK_W && (unsigned)y < (unsigned)TANK_H && ((g_under[y * DIRTY_WORDS_PER_ROW + (x >> 5)] >> (x & 31)) & 1);
+}
+static inline void bg_mark(int x0, int x1, int y) {
+    if (!g_bg_rec || (unsigned)y >= (unsigned)TANK_H) return;
+    if (x0 < 0) x0 = 0;
+    if (x1 > TANK_W - 1) x1 = TANK_W - 1;
+    if (x0 > x1) return;
+    uint32_t *row = g_bgmask + y * DIRTY_WORDS_PER_ROW;
+    int w0 = x0 >> 5, w1 = x1 >> 5;
+    if (w0 == w1) row[w0] |= (0xFFFFFFFFu >> (31 - (x1 & 31))) & (0xFFFFFFFFu << (x0 & 31));
+    else { row[w0] |= 0xFFFFFFFFu << (x0 & 31); for (int w = w0 + 1; w < w1; w++) row[w] = 0xFFFFFFFFu; row[w1] |= 0xFFFFFFFFu >> (31 - (x1 & 31)); }
+    if (y < g_sg_top) g_sg_top = y;
+}
 static void px(ctx_t *c, int x, int y, uint16_t col) {
     if (CTX_IN(c, x, y)) {
-        CTX_PX(c, x, y) = col;
+        CTX_PX(c, x, y) = FB_SWAP16(col);
         bb_add(x, x, y);
-        dirty_px(x, y);
+        dirty_px(x, y); TOUCH_PX(c, x, y);
     }
 }
 
@@ -117,12 +192,13 @@ static inline src_t src_color(uint32_t rgb, float dim) {
 }
 /* alpha 0..255 blend of a pre-dimmed source onto one framebuffer pixel */
 static inline void blend565(uint16_t *p, const src_t *s, int a) {
-    int dr = (*p >> 11) << 3, dg = ((*p >> 5) & 63) << 2, db = (*p & 31) << 3;
+    uint16_t cur = FB_SWAP16(*p);
+    int dr = (cur >> 11) << 3, dg = ((cur >> 5) & 63) << 2, db = (cur & 31) << 3;
     int r = dr + ((s->r - dr) * a >> 8), g = dg + ((s->g - dg) * a >> 8), b = db + ((s->b - db) * a >> 8);
-    *p = (uint16_t)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+    *p = FB_SWAP16((uint16_t)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)));
 }
 static inline void px_blend_s(ctx_t *c, int x, int y, const src_t *s, int a) {
-    if (CTX_IN(c, x, y)) { blend565(&CTX_PX(c, x, y), s, a); dirty_px(x, y); }
+    if (CTX_IN(c, x, y) && !under_bg(x, y)) { blend565(&CTX_PX(c, x, y), s, a); dirty_px(x, y); TOUCH_PX(c, x, y); }
 }
 /* alpha 0..255 blend onto existing pixel (one-off pixels; shapes hoist) */
 static void px_blend(ctx_t *c, int x, int y, uint32_t rgb, int a) {
@@ -135,10 +211,16 @@ static inline void span(ctx_t *c, int x0, int x1, int y, const src_t *s, int alp
     if (x0 < c->ox) x0 = c->ox;
     if (x1 > c->ox + c->w - 1) x1 = c->ox + c->w - 1;
     if (x0 > x1) return;
+    if (g_under) {                                   /* under the cached grass: pixel by pixel, only what shows (marking the rest would vignette the grass twice) */
+        uint16_t *q = &CTX_PX(c, x0, y); uint16_t sv = FB_SWAP16(s->v);
+        for (int x = x0; x <= x1; x++, q++) { if (under_bg(x, y)) continue; if (alpha >= 255) *q = sv; else blend565(q, s, alpha); dirty_px(x, y); TOUCH_PX(c, x, y); }
+        bb_add(x0, x1, y);
+        return;
+    }
     bb_add(x0, x1, y);
-    dirty_span(x0, x1, y);
+    dirty_span(x0, x1, y); TOUCH_SPAN(c, x0, x1, y);
     uint16_t *p = &CTX_PX(c, x0, y);
-    if (alpha >= 255) for (int x = x0; x <= x1; x++) *p++ = s->v;
+    if (alpha >= 255) { uint16_t sv = FB_SWAP16(s->v); for (int x = x0; x <= x1; x++) *p++ = sv; }
     else              for (int x = x0; x <= x1; x++) blend565(p++, s, alpha);
 }
 
@@ -225,7 +307,9 @@ static float yaw_at(float yh, float yt, float lx) {
  *   elder -> a longer tail and a dorsal crest. All procedural, zero flash. */
 /* `mark` scales the accent stripes: 1 in the tank (every stage wears the
  * same 2 x 5 px marks), the preview's size so they read on a big fish */
-static void draw_fish_core(ctx_t *c, const fish_t *f, float clock, bool asleep, float mark) {
+/* `floor_y`: the sand line under a fish in the tank (FISH_FLOOR_Y; the
+ * previews pass none) - nose up, a fish close to it lifts off level */
+static void draw_fish_core(ctx_t *c, const fish_t *f, float clock, bool asleep, float mark, float floor_y) {
     float tail = sinf(clock * (8 + f->speed * 0.055f) + f->wander) *
                  (0.32f + f->speed * 0.007f);
     float stress = f->stress / 10.0f;
@@ -238,6 +322,19 @@ static void draw_fish_core(ctx_t *c, const fish_t *f, float clock, bool asleep, 
      * much time in a vertical position") */
     float pmax = 0.61f + 0.35f * fminf(fmaxf((f->speed - 35) * (1 / 40.0f), 0), 1);
     float p = pmax * tanhf(0.8f * atan2f(sinf(f->heading), fabsf(cosf(f->heading))) / pmax);
+    /* off the sand (2026-10-24, Strato: a fish leaving the pellets on the
+     * floor swung its tail through the sand and a castle's footing): nose
+     * up, the tail swings DOWN - ~30 local px under the centre at a dash, an
+     * elder's tip even further. Close to the floor the climb starts LEVEL
+     * and tilts as the fish rises: level with the tail's flap just clear of
+     * the sand (16 local px of water under the centre), the full tilt 20 px
+     * higher. A fish rises off the bottom on its fins, back level. The
+     * painter's window stops at the sand line too (draw_fish), so whatever
+     * still reaches it brushes the floor instead of showing through it. */
+    if (p < 0 && floor_y < 1e8f) {
+        float k = ((floor_y - f->y) / f->size - 16) * (1 / 20.0f);
+        p *= k < 0 ? 0 : k > 1 ? 1 : k;
+    }
     float cp = cosf(p), sp = sinf(p);
     float yh = yaw_ease(f->yaw), yt = yaw_ease(f->yaw_tail);
     bool elder = f->stage == STAGE_ELDER, grown = f->stage >= STAGE_ADULT;
@@ -296,7 +393,20 @@ static void draw_fish_core(ctx_t *c, const fish_t *f, float clock, bool asleep, 
 }
 /* the tank's fish (the previews below draw a fish of their own) */
 static void draw_fish(ctx_t *c, const tank_t *t, const fish_t *f) {
-    draw_fish_core(c, f, t->clock, t->night && f->goal.id == GOAL_REST, 1.0f);
+    ctx_t cf = *c;                                     /* its window ends at the sand line (FISH_FLOOR_Y): a fin that reaches
+                                                          the floor touches it, never shows through it - nothing of a fish is
+                                                          ever painted over the sand or a piece's footing (2026-10-24) */
+    int h = FISH_FLOOR_Y - cf.oy; if (h < cf.h) cf.h = h;
+    bool asleep = t->night && f->goal.id == GOAL_REST;
+    /* and its BODY rests on the sand, never in it: the physics lets a centre
+       down to 15 x size off the bottom (tank.c's hard clamp; a pellet lies
+       2 px into the sand), where the biggest fish's belly would be 8 px under
+       the line and the window would cut it flat. Drawn that much higher, it
+       lies on the sand with its mouth at the pellet - smoothly, the lift
+       growing as it sinks - and only a fin ever reaches the window's edge. */
+    float sink = f->y + 10 * f->size - FISH_FLOOR_Y;
+    if (sink > 0) { fish_t g = *f; g.y -= sink; draw_fish_core(&cf, &g, t->clock, asleep, 1.0f, FISH_FLOOR_Y); return; }
+    draw_fish_core(&cf, f, t->clock, asleep, 1.0f, FISH_FLOOR_Y);
 }
 
 /* ---- the shrimp (2026-09-29): cherry shrimp from 18 x 8 pixel grids,
@@ -378,7 +488,7 @@ static void draw_snail(ctx_t *c, const tank_t *t, bool upright_pass);
 
 /* optional per-stage frame profiling (render.h) */
 int64_t (*render_clock_us)(void) = NULL;
-int64_t render_prof_us[7];
+int64_t render_prof_us[14];
 #define PROF_MARK() (render_clock_us ? render_clock_us() : 0)
 #define PROF_ADD(i, t0) do { if (render_clock_us) { int64_t _n = render_clock_us(); render_prof_us[i] += _n - (t0); (t0) = _n; } } while (0)
 
@@ -394,15 +504,39 @@ void render_set_scene_cache(uint16_t *buf) { g_scene = buf; g_scene_dim = -1; }
 void render_set_vignette_cache(uint8_t *buf) { g_vig = buf; g_vig_filled = false; }
 
 const uint16_t *render_scene_buf(unsigned *epoch) {
+    if (g_sg_on && g_sg_ok && g_sg_scene_ep == g_scene_epoch && g_scene_epoch) { if (epoch) *epoch = 0x80000000u | g_sg_ep; return g_sceneg; }   /* the grass cache, when it is current */
     if (epoch) *epoch = g_scene_epoch;
     return g_scene_epoch ? g_scene : NULL;
 }
 void render_fb_primed(const uint16_t *fb, unsigned epoch) { g_primed_fb = fb; g_primed_epoch = epoch; }
+/* the scene back under what a frame drew (its touched mask): runs of touched
+ * 32 px words copied from the scene. Returns the scene epoch it restored
+ * against: the buffer is primed for that epoch (a bake in between shows as a
+ * mismatch at the next render, which copies the whole scene then). */
+unsigned render_restore_touched(uint16_t *fb, const uint32_t *touched) {
+    unsigned ep = g_scene_epoch;
+    if (!g_scene || !touched) return ep;
+    for (int y = 0; y < TANK_H; y++) {
+        const uint32_t *row = touched + y * DIRTY_WORDS_PER_ROW;
+        uint16_t *d = fb + y * TANK_W; const uint16_t *s = g_scene + y * TANK_W;
+        for (int w = 0; w < DIRTY_WORDS_PER_ROW; w++) {
+            if (!row[w]) continue;
+            int w1 = w;
+            while (w1 + 1 < DIRTY_WORDS_PER_ROW && row[w1 + 1]) w1++;
+            int x0 = w * 32, x1 = (w1 + 1) * 32;
+            if (x1 > TANK_W) x1 = TANK_W;
+            memcpy(d + x0, s + x0, (size_t)(x1 - x0) * 2);
+            w = w1;
+        }
+    }
+    return ep;
+}
+unsigned render_scene_epoch(void) { return g_scene_epoch; }
 
 /* vignette alpha at (x,y); matches the classic per-pixel loop */
 static inline int vig_alpha(int x, int y) {
-    float dx = (x - TANK_W * 0.5f) / (TANK_W * 0.5f);
-    float dy = (y - TANK_H * 0.5f) / (TANK_H * 0.5f);
+    float dx = (x - TANK_W * 0.5f) * (2.0f / TANK_W);   /* (multiplies: a frond span calls this - 2026-10-23) */
+    float dy = (y - TANK_H * 0.5f) * (2.0f / TANK_H);
     float d2 = dx * dx + dy * dy;
     if (d2 <= 0.72f) return 0;
     int a = (int)((d2 - 0.72f) * 220);
@@ -411,10 +545,10 @@ static inline int vig_alpha(int x, int y) {
 
 /* pure darkening (blend toward black), independent of ctx dim */
 static inline void px_darken(uint16_t *p, int a) {
-    int inv = 256 - a;
-    *p = (uint16_t)(((((*p >> 11) * inv) >> 8) << 11) |
-                    ((((((*p) >> 5) & 63) * inv) >> 8) << 5) |
-                    (((*p & 31) * inv) >> 8));
+    int inv = 256 - a; uint16_t cur = FB_SWAP16(*p);
+    *p = FB_SWAP16((uint16_t)(((((cur >> 11) * inv) >> 8) << 11) |
+                              (((((cur >> 5) & 63) * inv) >> 8) << 5) |
+                              (((cur & 31) * inv) >> 8)));
 }
 
 /* ---- the pumpkin lantern's night light (0.3.6; Strato 2026-10-17: "its
@@ -462,6 +596,8 @@ static bool g_pk_under_castle;                /* the castle stands over the lant
 static int  g_npc;                            /* this frame's pieces */
 static int  g_pk_k = -1;                      /* the lantern's index in the list, -1 = none */
 static int  g_clip_k = -1;                    /* an overlay (a crown, the candle) of piece g_clip_k is being drawn: the pieces above it cover it */
+static bool g_cst_clip;                       /* the castle is being painted again inside a box (render_tank's live pass, 0.3.9): castle_put skips the rest */
+static int  g_cst_clip_x0, g_cst_clip_y0, g_cst_clip_x1, g_cst_clip_y1;
 static int  g_castle_cx = -1;                 /* the castle's centre whatever its depth (-1 = none): its shadow's geometry */
 static bool pc_covered_above(int k, int x, int y);
 /* and everything else in front of a lantern BEHIND (Strato 2026-10-17: "add
@@ -512,30 +648,58 @@ static inline uint16_t px_lit(uint16_t v, uint32_t l) {   /* a 565 colour plus t
     int r = (v >> 11) + (int)(l >> 11), g = ((v >> 5) & 63) + (int)((l >> 5) & 63), b = (v & 31) + (int)(l & 31);
     return (uint16_t)((r > 31 ? 31 : r) << 11 | (g > 63 ? 63 : g) << 5 | (b > 31 ? 31 : b));
 }
-#define PK_LIGHT_PX(p, x, y) do { if (g_pk_lx >= 0) { uint32_t _l = pk_light_at((x), (y)); if (_l) *(p) = px_lit(*(p), _l); } } while (0)
+#define PK_LIGHT_PX(p, x, y) do { if (g_pk_lx >= 0) { uint32_t _l = pk_light_at((x), (y)); if (_l) *(p) = FB_SWAP16(px_lit(FB_SWAP16(*(p)), _l)); } } while (0)
 
 /* a span that is FINAL: blended, then vignetted right here, and NOT marked
  * dirty, so the re-apply sweep never touches it (scene cache mode only) */
+int g_veg_bench_dry;                              /* director `vegbench` (2026-10-23): 1 = span_final does everything but the stores; 2 = and no vignette alpha; 3 = veg_put returns at once */
+/* the vignette's CLEAR ZONE per row (2026-10-24): vig_alpha is 0 within this
+ * many px of the frame's centre column on row y (255: nowhere on the row).
+ * Built once; a span whose middle is inside it skips the alpha's arithmetic -
+ * most of the grass is (vegbench: 0.25 us of a 1.7 us span on the square) */
+static uint8_t g_vig_half[TANK_H];
+static bool    g_vig_half_ok;
+static void vig_half_fill(void) {
+    for (int y = 0; y < TANK_H; y++) {
+        if (vig_alpha(TANK_W / 2, y)) { g_vig_half[y] = 255; continue; }
+        int d = 0;
+        while (TANK_W / 2 + d + 1 < TANK_W && d < 254 && !vig_alpha(TANK_W / 2 + d + 1, y)) d++;
+        g_vig_half[y] = (uint8_t)d;
+    }
+    g_vig_half_ok = true;
+}
+static inline int vig_alpha_span(int xc, int y) {
+    if (!g_vig_half_ok) vig_half_fill();
+    if ((unsigned)y < (unsigned)TANK_H && g_vig_half[y] != 255) {
+        int dd = xc - TANK_W / 2; if (dd < 0) dd = -dd;
+        if (dd <= g_vig_half[y]) return 0;
+    }
+    return vig_alpha(xc, y);
+}
 static inline void span_final(ctx_t *c, int x0, int x1, int y, const src_t *s, int alpha) {
     if ((unsigned)(y - c->oy) >= (unsigned)c->h) return;
     if (x0 < c->ox) x0 = c->ox;
     if (x1 > c->ox + c->w - 1) x1 = c->ox + c->w - 1;
     if (x0 > x1) return;
+    TOUCH_SPAN(c, x0, x1, y);
     uint16_t *p = &CTX_PX(c, x0, y);
     /* ONE vignette alpha per span, computed (a 5 px frond span changes it by
        < 4%, invisible) rather than read: the PSRAM LUT costs a cache line
        per span and fronds are vertical, which was most of the frond cost */
-    int a = vig_alpha((x0 + x1) >> 1, y);
+    int a = g_veg_bench_dry >= 2 ? 0 : vig_alpha_span((x0 + x1) >> 1, y);
     uint32_t l = g_pk_lx >= 0 ? pk_light_at((x0 + x1) >> 1, y) : 0;   /* the lantern's light, one per span likewise */
-    if (l) dirty_clear_span(x0, x1, y);         /* lit here: a fish under it must not be lit again by the dirty pass */
+    if (l || a) dirty_clear_span(x0, x1, y);    /* lit here: a fish under it must not be lit again by the dirty pass; in the vignette's ring: a crab or a
+                                                   fish under it must not have the sweep dim this span a second time (2026-10-24, the watch: a front
+                                                   bed's fronds a deeper green over the crab backed into the castle; the matrix) */
     if (alpha >= 255) {                         /* opaque: a store, no PSRAM read */
-        uint16_t v = l ? px_lit(s->v, l) : s->v;
+        uint16_t v = FB_SWAP16(l ? px_lit(s->v, l) : s->v);
+        if (g_veg_bench_dry) return;
         for (int x = x0; x <= x1; x++, p++) { *p = v; if (a) px_darken(p, a); }
         return;
     }
     for (int x = x0; x <= x1; x++, p++) {
         blend565(p, s, alpha);
-        if (l) *p = px_lit(*p, l);
+        if (l) *p = FB_SWAP16(px_lit(FB_SWAP16(*p), l));
         if (a) px_darken(p, a);
     }
 }
@@ -583,7 +747,18 @@ static int bed_z(const tank_t *t, int b) { return b == 3 ? tank_decor_z(t, 0) : 
 /* a frond span - minus the castle's silhouette while the castle stands IN
  * FRONT of the grass (the pieces outside it are drawn; the mask and
  * g_veg_mask_cx live with the castle, below). Off the castle it is one span. */
-#define CASTLE_FY   (TANK_BOT - 16)
+/* DEPTH (0.3.9, tank.h DECOR_FY): a piece stands on the floor line of its
+ * depth - BEHIND at the back of the sand, IN FRONT 8 px lower at its front
+ * edge - so every piece's FY below is its own line plus this frame's shift
+ * for it (pieces_build sets them from the tank's depths; 0 with no piece).
+ * The castle's native line is the back line, the cell sprites' (the coral,
+ * the cluster, the lantern) 6 px under it (sunk into the pebbles). */
+static int g_dz_castle, g_dz_coral, g_dz_cl, g_dz_pk, g_dz_vo;
+static inline int decor_dz(int z, int native_fy) { return DECOR_FY(z) - native_fy; }
+/* and its HAZE with the water: BEHIND a little more, IN FRONT a little less (the
+ * same shift says which: the back line's is 0 or -6, the front line's +8 or +2) */
+static inline float decor_haze(float alpha, int dz) { float a = dz > 0 ? alpha + 0.05f : alpha - 0.08f; return a > 0.97f ? 0.97f : a; }
+#define CASTLE_FY   (TANK_BOT - 16 + g_dz_castle)
 #define CASTLE_ROWS 164
 #define CASTLE_ARCH_R 26                     /* the opening's half-width (and the vault's radius) */
 #define CASTLE_ARCH_S 24                     /* the spring line: straight jambs below, the vault above */
@@ -607,14 +782,76 @@ static uint32_t g_veg_skip;
 static bool pc_covers(int k, int x, int y);
 static bool pc_in_box(int k, int x0, int x1, int y);
 static uint32_t pc_row_bits(int k, int x0, int n, int y);   /* piece k's mask over n (<= 32) pixels from x0 on row y */
+static uint8_t g_veg_row_near[TANK_H];
+/* the grass in ROW PAIRS (2026-10-24, Strato: "explore making the grass cheaper
+ * to draw ... open to an altered look"): with g_veg_step 2 each frond is walked
+ * every second row and each step paints two rows with one span's setup - one
+ * clip, one vignette alpha, one light - so a frond costs about half the spans.
+ * Its edges step in 2 px instead of 1 (the corals' cells are 2 px already).
+ * Director `vegstep 1|2`, the sim's PT_VEG_STEP. */
+int g_veg_step = 1;
+int g_veg_thin;                                   /* director `vegthin 1` (2026-10-24, a COST PROBE only): every third frond not drawn - what a sparser bed would save */
+void render_set_veg_step(int s) { g_veg_step = s == 2 ? 2 : s == 0 ? 0 : 1; }   /* (0: the grass not drawn - the director's A/B of its whole cost) */
+int  render_veg_step(void) { return g_veg_step; }
+static inline void span_final2(ctx_t *c, int x0, int x1, int y, uint16_t v0, uint16_t v1) {   /* rows y and y-1, opaque, final */
+    if ((unsigned)(y - 1 - c->oy) >= (unsigned)(c->h - 1)) {                /* (a pair at the window's edge: row by row) */
+        src_t s0 = { 0, 0, 0, v0 }, s1 = { 0, 0, 0, v1 };
+        span_final(c, x0, x1, y, &s0, 255); span_final(c, x0, x1, y - 1, &s1, 255);
+        return;
+    }
+    if (x0 < c->ox) x0 = c->ox;
+    if (x1 > c->ox + c->w - 1) x1 = c->ox + c->w - 1;
+    if (x0 > x1) return;
+    TOUCH_SPAN(c, x0, x1, y); TOUCH_SPAN(c, x0, x1, y - 1);
+    int xc = (x0 + x1) >> 1, a = vig_alpha_span(xc, y);
+    uint32_t l = g_pk_lx >= 0 ? pk_light_at(xc, y) : 0;
+    if (l || a) { dirty_clear_span(x0, x1, y); dirty_clear_span(x0, x1, y - 1); }   /* (as span_final: lit or in the ring, nothing dirty stays under a final pair) */
+    uint16_t w0 = FB_SWAP16(l ? px_lit(v0, l) : v0), w1 = FB_SWAP16(l ? px_lit(v1, l) : v1);
+    uint16_t *p = &CTX_PX(c, x0, y), *q = &CTX_PX(c, x0, y - 1);
+    if (a) for (int x = x0; x <= x1; x++, p++, q++) { *p = w0; px_darken(p, a); *q = w1; px_darken(q, a); }
+    else   for (int x = x0; x <= x1; x++, p++, q++) { *p = w0; *q = w1; }
+}
+/* the back grass in the open arch of a castle IN FRONT (the back beds, the
+ * even fronds of the woven beds) is FINAL - vignetted on the spot, never in
+ * the dirty mask - so since the arch's shade went into the bake and the
+ * per-frame pass re-shades only the dirty pixels (2026-10-23), those fronds
+ * came back at full brightness (Strato's 1.8, the same evening: "every other
+ * frond in the arch"). A final span that crosses the arch takes the tunnel's
+ * shade itself, by the same alpha; the grass cache's bake goes through here
+ * too, so a frame primed from it matches. Off while the lantern behind the
+ * castle lights the tunnel, as arch_shade is (render_tank sets both). */
+static bool g_veg_arch_shade;                     /* this frame: a castle IN FRONT whose tunnel is shaded */
+static bool g_veg_arch_night;
+static int  arch_shade_alpha(int y, bool night);
+static void veg_arch_shade(ctx_t *c, int x0, int x1, int y) {
+    if (!CTX_IN(c, x0, y) && !CTX_IN(c, x1, y)) return;
+    int a = arch_shade_alpha(y, g_veg_arch_night);
+    for (int x = x0; x <= x1; x++)
+        if (castle_arch(x, y) && CTX_IN(c, x, y)) px_darken(&CTX_PX(c, x, y), a);
+}
+static inline void veg_put(ctx_t *c, int x0, int x1, int y, const src_t *s, bool final, bool arch) {
+    if (g_veg_bench_dry >= 3) return;
+    bg_mark(x0, x1, y);
+    if (final && g_veg_arch_pass >= 0) {
+        span_final(c, x0, x1, y, s, 255);
+        if (arch) {
+            if (g_veg_arch_shade && g_veg_arch_pass == 0) veg_arch_shade(c, x0, x1, y);   /* (the late pass never enters the arch) */
+            else dirty_clear_span(x0, x1, y);         /* a bed IN FRONT across the opening: final, so the arch's dirty pass must not shade it over a crab or a fish */
+        }
+    } else span(c, x0, x1, y, s, 255);               /* the early arch pass: marked, so the arch's shade finds it (2026-10-23) and the sweep vignettes it */
+}
 static inline void veg_span(ctx_t *c, int x0, int x1, int y, const src_t *s, bool final) {
+    if ((unsigned)y < (unsigned)TANK_H && !g_veg_row_near[y]) {   /* this row meets no piece and no arch (draw_veg's table): the span, or nothing in the early arch pass */
+        if (g_veg_arch_pass >= 0) veg_put(c, x0, x1, y, s, final, false);
+        return;
+    }
     uint32_t near = 0;
     for (int k = 0; k < g_npc; k++) if (((g_veg_skip >> k) & 1) && pc_in_box(k, x0, x1, y)) near |= 1u << k;
     bool arch_box = g_veg_mask_cx >= 0 && y <= CASTLE_FY && y >= CASTLE_FY - CASTLE_ARCH_S - CASTLE_ARCH_R
                     && x1 >= g_veg_mask_cx - CASTLE_ARCH_R && x0 <= g_veg_mask_cx + CASTLE_ARCH_R;
     if (g_veg_arch_pass < 0 && !arch_box) return;      /* the early arch pass: nothing outside the arch */
     if (!near && !(g_veg_arch_pass && arch_box)) {      /* the usual frond: one span */
-        if (final) span_final(c, x0, x1, y, s, 255); else span(c, x0, x1, y, s, 255);
+        veg_put(c, x0, x1, y, s, final, arch_box);
         return;
     }
     /* near a piece: the pieces' bits over the span, one look per piece
@@ -626,7 +863,7 @@ static inline void veg_span(ctx_t *c, int x0, int x1, int y, const src_t *s, boo
         for (int k = 0; k < g_npc; k++) if ((near >> k) & 1) m |= pc_row_bits(k, x0, n, y);
         if (g_veg_arch_pass && arch_box)                 /* the arch: the early pass draws only it, the late one skips it */
             for (int i = 0; i < n; i++) { bool a = castle_arch(x0 + i, y); if (g_veg_arch_pass > 0 ? a : !a) m |= 1u << i; }
-        if (!m) { if (final) span_final(c, x0, x1, y, s, 255); else span(c, x0, x1, y, s, 255); return; }
+        if (!m) { veg_put(c, x0, x1, y, s, final, arch_box); return; }
         if (m == full) return;
     }
     int run = -1;
@@ -641,28 +878,47 @@ static inline void veg_span(ctx_t *c, int x0, int x1, int y, const src_t *s, boo
         }
         if (!in) { if (run < 0) run = x0 + i; }
         else if (run >= 0) {
-            if (final) span_final(c, run, x0 + i - 1, y, s, 255); else span(c, run, x0 + i - 1, y, s, 255);
+            veg_put(c, run, x0 + i - 1, y, s, final, arch_box);
             run = -1;
         }
     }
 }
 /* layer: 0 = the even fronds, 1 = the odd ones, -1 = every frond */
 static const int VEG_SEED[VEG_BEDS_MAX] = { 0, 7, 3, 5 };   /* each bed's sway phase (the seahorse's blade reads it too) */
+/* g_veg_row_near (declared with veg_span above): per row of the bed being drawn: the pieces whose boxes its spans can meet (bits by
+                                                              * piece), and bit 7 = the row crosses a castle's open arch (draw_veg fills it once a
+                                                              * bed; veg_span reads it: most rows meet nothing and take the fast path - 2026-10-23) */
 static void draw_veg(ctx_t *c, const tank_t *t, int b, int seed, int layer, bool final) {
+    if (!g_veg_step) return;                         /* director `vegstep 0`: the A/B of the grass's whole cost */
     veg_tint_fill(c->dim);
-    int n; tank_veg_bed(t, b, NULL, NULL, NULL, &n);
+    int n; float bx0, bx1; tank_veg_bed(t, b, &bx0, &bx1, NULL, &n);
     /* the sword plant (bed 3, the shop): broad lanceolate leaves - a narrow
        stem, 7 px half-width at 40% of the way up, a point at the tip - a
        lazier sway, its own yellow-green pair */
     bool sword = tank_veg_kind(t, b) == VEG_KIND_SWORD;
     float root = 2.4f, tip = 0.4f, amp = sword ? 2.5f : 4.0f;
+    /* once a bed, not a span (2026-10-23: the tests below ran for every one of a frame's
+       ~6000 spans): per row, the pieces whose boxes the bed's spans can meet (+-8: the
+       sway and the half-width), and whether the row crosses a castle's open arch */
+    { int y_lo = (int)(TANK_BOT - 16 - (VEG_MAX_SEGS - 1) * VEG_SEG_DY - VEG_SEG_RY), y_hi = (int)(TANK_BOT - 16 + VEG_SEG_RY);
+      if (y_lo < 0) y_lo = 0;
+      if (y_hi > TANK_H - 1) y_hi = TANK_H - 1;
+      int xa = (int)bx0 - 8, xb = (int)bx1 + 8;
+      for (int y = y_lo; y <= y_hi; y++) {
+          uint8_t m = 0;
+          for (int k = 0; k < g_npc; k++) if (((g_veg_skip >> k) & 1) && pc_in_box(k, xa, xb, y)) m |= (uint8_t)(1u << k);
+          if (g_veg_mask_cx >= 0 && y <= CASTLE_FY && y >= CASTLE_FY - CASTLE_ARCH_S - CASTLE_ARCH_R
+              && xb >= g_veg_mask_cx - CASTLE_ARCH_R && xa <= g_veg_mask_cx + CASTLE_ARCH_R) m |= 0x80;
+          g_veg_row_near[y] = m;
+      } }
     for (int i = 0; i < n; i++) {
         if (layer >= 0 && (i & 1) != layer) continue;
+        if (g_veg_thin && b != 3 && i % 3 == 2) continue;   /* (the cost probe: a sparser bed) */
         float bx;
         /* each frond's own height (tank_t.veg_h): what the keeper cut is
            exactly what shows - no render-side variation on top */
         int segs = tank_veg_frond(t, b, i, &bx);
-        if (g_veg_arch_pass < 0 && (bx + 14 < g_veg_mask_cx - CASTLE_ARCH_R || bx - 14 > g_veg_mask_cx + CASTLE_ARCH_R)) continue;   /* the early arch pass: only the fronds that can reach the arch (sway + a leaf's half width) */
+        if (g_veg_arch_pass < 0 && (bx + 14 < g_veg_mask_cx - CASTLE_ARCH_R || bx - 14 > g_veg_mask_cx + CASTLE_ARCH_R)) continue;   /* the early arch pass: only the fronds that reach the arch */
         if (segs < 1) segs = 1;                    /* nubs: always a bit of green */
         if (segs > VEG_MAX_SEGS) segs = VEG_MAX_SEGS;
         float sway = fast_sin(t->clock * (sword ? 0.6f : 0.9f) + (i + seed) * 1.7f) * amp;
@@ -673,31 +929,67 @@ static void draw_veg(ctx_t *c, const tank_t *t, int b, int seed, int layer, bool
         /* one span per pixel row, centred on the spine, half-width tapering
          * toward the tip: the same silhouette the old chain of overlapping
          * ellipses drew (their union was a 5 px ribbon), at ~a quarter fewer
-         * pixels and without a sqrt per row. Full canopy = ~1000 segments. */
+         * pixels and without a sqrt per row. Full canopy = ~1000 segments.
+         * The rows are WALKED (2026-10-23: the interpolation chain per row -
+         * the segment, its fraction, the taper - was 0.86 us of a 1.86 us
+         * span on the square): the spine's x and the half-width advance by a
+         * constant a row within a segment, the taper by a constant a row
+         * (the sword's in two legs), so a row costs a few adds. */
         const uint16_t *pal = g_veg_row[(sword ? 2 : 0) + ((i + seed) & 1)];
         int y_bot = (int)(TANK_BOT - 16 + VEG_SEG_RY);
         int y_top = (int)(TANK_BOT - 16 - (segs - 1) * VEG_SEG_DY - VEG_SEG_RY);
-        for (int y = y_bot; y >= y_top; y--) {
-            float sp = (TANK_BOT - 16 - y) / VEG_SEG_DY;          /* fractional segment */
-            if (sp < 0) sp = 0;
-            if (sp > segs - 1) sp = (float)(segs - 1);
-            /* taper relative to the frond's own length (2.4 px at the root,
-             * 0.4 at the tip): the old fixed 0.07/segment thinned every frond
-             * to nothing at 29 segments, a hidden height cap now that fronds
-             * grow to the ceiling (VEG_SEGS_FULL) */
-            float u = sp / (segs > 1 ? segs - 1 : 1);
-            float half = sword ? 1.2f + 6.0f * (u < 0.4f ? u / 0.4f : (1 - u) / 0.6f)
-                               : root - (root - tip) * u;
-            if (half < tip) half = tip;
-            int k = (int)sp; float fr = sp - k;
-            float cx = xs[k] + (xs[k + 1] - xs[k]) * fr;
+        const float dsp = 1.0f / VEG_SEG_DY, segf = (float)(segs - 1), inv = segs > 1 ? 1.0f / (segs - 1) : 1.0f;
+        /* the taper: grass thins root -> tip in a line; the sword widens to u = 0.4 and thins to the point */
+        const float dh_grass = -(root - tip) * inv * dsp;
+        const float sw_peak = 0.4f * segf;                      /* the sword's widest segment */
+        const float dh_sw_up = 6.0f * 2.5f * inv * dsp, dh_sw_dn = -6.0f * (1.0f / 0.6f) * inv * dsp;
+        const int st = g_veg_step;                              /* rows a step: 1, or 2 (row pairs, above) */
+        float sp = (TANK_BOT - 16 - y_bot) * dsp;              /* the first row sits under the root: sp < 0 is clamped */
+        int k = 0; float cx = xs[0], dcx = (xs[1] - xs[0]) * dsp, half, dhalf;
+        if (sword) { half = 1.2f; dhalf = dh_sw_up; } else { half = root; dhalf = dh_grass; }
+        for (int y = y_bot; y >= y_top; y -= st, sp += dsp * st) {
+            if (sp >= 0) {
+                if (sp >= segf) {                               /* the tip rows: held at the last segment */
+                    if (dcx != 0 || dhalf != 0) { half = sword ? 1.2f : tip; dcx = 0; dhalf = 0; }
+                    cx = xs[segs - 1];
+                } else {
+                    int kk = (int)sp;
+                    if (kk != k) {                              /* into the next segment: its own slope, re-anchored (no drift) */
+                        k = kk; dcx = (xs[k + 1] - xs[k]) * dsp; cx = xs[k] + (xs[k + 1] - xs[k]) * (sp - k);
+                        if (sword) { dhalf = sp < sw_peak ? dh_sw_up : dh_sw_dn; half = sp < sw_peak ? 1.2f + 6.0f * (sp * inv) * 2.5f : 1.2f + 6.0f * (1 - sp * inv) * (1.0f / 0.6f); }
+                        else half = root - (root - tip) * sp * inv;
+                    } else { cx += dcx * st; half += dhalf * st; }
+                    if (sword && dhalf > 0 && sp >= sw_peak) { dhalf = dh_sw_dn; half = 1.2f + 6.0f * (1 - sp * inv) * (1.0f / 0.6f); }
+                }
+            }
+            float h = half < tip ? tip : half;
+            int x0 = (int)(cx - h), x1 = (int)(cx + h);
+            if (st == 2 && y >= 1) {                            /* a row pair: one span's work when the pair meets nothing */
+                if (final && g_veg_arch_pass >= 0 && !g_veg_row_near[y] && !g_veg_row_near[y - 1] && !g_veg_bench_dry) { span_final2(c, x0, x1, y, pal[y], pal[y - 1]); bg_mark(x0, x1, y); bg_mark(x0, x1, y - 1); }
+                else { src_t s0; s0.v = pal[y]; veg_span(c, x0, x1, y, &s0, final); src_t s1; s1.v = pal[y - 1]; veg_span(c, x0, x1, y - 1, &s1, final); }
+                continue;
+            }
             src_t s; s.v = pal[y];                              /* opaque: only .v is read */
-            veg_span(c, (int)(cx - half), (int)(cx + half), y, &s, final);
+            veg_span(c, x0, x1, y, &s, final);
         }
     }
 }
 
 
+/* director `vegbench` (2026-10-23): one bed's fronds drawn 20 times into fb, with and without the stores */
+void render_veg_bench(const tank_t *t, uint16_t *fb, int bed, int64_t (*clock_us)(void), int64_t *full_us, int64_t dry_us[3], int *spans) {
+    ctx_t c = ctx_full(fb, TANK_W, 1.0f);
+    g_veg_skip = 0; g_veg_mask_cx = -1; g_veg_arch_pass = 0;
+    int n; tank_veg_bed(t, bed, NULL, NULL, NULL, &n);
+    int rows = 0; for (int i = 0; i < n; i++) { float bx; int s = tank_veg_frond(t, bed, i, &bx); if (s < 1) s = 1; rows += (int)(s * VEG_SEG_DY + 2 * VEG_SEG_RY); }
+    *spans = rows;
+    int64_t t0 = clock_us(); for (int k = 0; k < 20; k++) draw_veg(&c, t, bed, VEG_SEED[bed], -1, true); *full_us = (clock_us() - t0) / 20;
+    for (int m = 1; m <= 3; m++) {
+        g_veg_bench_dry = m;
+        t0 = clock_us(); for (int k = 0; k < 20; k++) draw_veg(&c, t, bed, VEG_SEED[bed], -1, true); dry_us[m - 1] = (clock_us() - t0) / 20;
+    }
+    g_veg_bench_dry = 0;
+}
 /* ---- the castle (2026-09-16, from Strato's castle-v2 mockup) ----
  * A swim-through decoration drawn the way the fish and the fronds are -
  * spans and fills from a little geometry, no bitmap - so it sits in the same
@@ -723,22 +1015,24 @@ static const uint32_t CASTLE_RGB[CT_N] = {
 /* [keep | gate][tone][row], row 0 = CASTLE_FY - CASTLE_ROWS */
 static uint16_t g_castle_row[2][CT_N][CASTLE_ROWS + 12];
 static float    g_castle_dim = -1;
+static int      g_castle_dzk = 99;                                   /* the shift (= the depth) the rows were hazed for */
 /* the castle's silhouette, one bit per pixel in local coords (x - cx + 112,
  * 0..223; row 0 = CASTLE_FY - CASTLE_ROWS): every pixel castle_put writes
  * sets its bit, so the first full draw fills it. While the castle stands IN
  * FRONT of the grass, frond spans skip the pixels inside it (veg_span). */
 #define CASTLE_MASK_W 224
 static void castle_tint_fill(float dim) {
-    if (g_castle_dim == dim) return;
+    if (g_castle_dim == dim && g_castle_dzk == g_dz_castle) return;
+    float keep = decor_haze(0.70f, g_dz_castle), gate = decor_haze(0.82f, g_dz_castle);   /* by its depth (0.3.9) */
     for (int r = 0; r < CASTLE_ROWS + 12; r++) {
         int y = CASTLE_FY - CASTLE_ROWS + r;
         uint32_t w = water_rgb(y < 0 ? 0 : y >= TANK_H ? TANK_H - 1 : y);
         for (int k = 0; k < CT_N; k++) {
-            g_castle_row[0][k][r] = rgb565(mix(w, CASTLE_RGB[k], k == CT_INSIDE ? 0.6f : 0.70f), dim);
-            g_castle_row[1][k][r] = rgb565(mix(w, CASTLE_RGB[k], k == CT_INSIDE ? 0.6f : 0.82f), dim);
+            g_castle_row[0][k][r] = rgb565(mix(w, CASTLE_RGB[k], k == CT_INSIDE ? 0.6f : keep), dim);
+            g_castle_row[1][k][r] = rgb565(mix(w, CASTLE_RGB[k], k == CT_INSIDE ? 0.6f : gate), dim);
         }
     }
-    g_castle_dim = dim;
+    g_castle_dim = dim; g_castle_dzk = g_dz_castle;
 }
 static inline uint32_t chash(int a, int b) {
     uint32_t h = (uint32_t)a * 73856093u ^ (uint32_t)b * 19349663u;
@@ -794,13 +1088,14 @@ typedef struct { ctx_t *c; int cx; int layer; bool final; } cst_t;
 static inline void castle_put(const cst_t *k, int x, int y, uint16_t v) {
     ctx_t *c = k->c;
     if (!CTX_IN(c, x, y)) return;
+    if (g_cst_clip && (x < g_cst_clip_x0 || x > g_cst_clip_x1 || y < g_cst_clip_y0 || y > g_cst_clip_y1)) return;   /* a repaint inside a box (0.3.9) */
     { int lx = x - k->cx + CASTLE_MASK_W / 2, r = y - (CASTLE_FY - CASTLE_ROWS);
       if ((unsigned)lx < CASTLE_MASK_W && (unsigned)r < CASTLE_ROWS + 12) {
           g_castle_mask[r][lx >> 5] |= 1u << (lx & 31);
           if (k->layer == 1) castle_front()[r][lx >> 5] |= 1u << (lx & 31);
       } }
     uint16_t *p = &CTX_PX(c, x, y);
-    *p = v;
+    *p = FB_SWAP16(v); TOUCH_PX(c, x, y);
     if (k->final) {                          /* vignetted here, and untagged: the sweep must not darken it again */
         PK_LIGHT_PX(p, x, y);
         int a = g_vig ? g_vig[y * TANK_W + x] : vig_alpha(x, y);
@@ -973,13 +1268,14 @@ static void draw_castle(ctx_t *c, int cx, int front, bool final) {
 #define CORAL_CH   46
 #define CORAL_W    (CORAL_CW * CORAL_CELL)
 #define CORAL_H    (CORAL_CH * CORAL_CELL)
-#define CORAL_FY   (TANK_BOT - 14 + DECOR_SINK)   /* the base, sunk into the pebbles (a mound covers the joint) */
+#define CORAL_FY   (TANK_BOT - 14 + DECOR_SINK + g_dz_coral)   /* the base, sunk into the pebbles (a mound covers the joint); on its depth's line (0.3.9) */
 enum { CO_NONE = 0, CO_RIM, CO_BODY, CO_SHADE, CO_LIT, CO_TIP, CO_N };
 static int      g_coral_q = -1;               /* the growth step the sprite was built for (CORAL_Q steps) */
 #define CORAL_Q 128                           /* ~5.6 h per step over the 30 days: a rebuild each */
 static int      g_coral_cells;                /* filled cells in the sprite (the selftest) */
 static uint32_t g_coral_rgb = 1;              /* what the rows hold (1 = never) */
 static float    g_coral_dim = -1;
+static int      g_coral_dzk = 99;
 /* the decor scratch (2026-09-24): every table the coral and the reef cluster
  * build - sprites, tinted rows, the distance grids - lives in ONE block the
  * platform hands over (render_set_decor_scratch: the firmware gives PSRAM,
@@ -994,6 +1290,14 @@ static float    g_coral_dim = -1;
 #define PK_CW   44
 #define PK_CH   41
 #define PK_N    16
+#define VO_CELL 2                                 /* the bubble volcano (0.3.9, below): a 2 px cell sprite like the lantern's */
+#define VO_CW   92
+#define VO_CH   104
+#define VO_W    (VO_CW * VO_CELL)
+#define VO_H    (VO_CH * VO_CELL)
+#define VO_GLOW_MAX 640
+enum { VO_NONE = 0, VO_ROCK_L, VO_ROCK, VO_ROCK_D, VO_ROCK_DD, VO_SCORCH, VO_MOSS_A, VO_MOSS_B, VO_CAVE, VO_CAVE_MID,
+       VO_CAVE_LIT, VO_LAVA_DIM, VO_LAVA, VO_LAVA_HOT, VO_LAVA_CORE, VO_N };          /* VO_CAVE_LIT.. glow: the lava's */
 typedef struct {
     uint8_t  co_sprite[CORAL_CH][CORAL_CW];
     uint16_t co_row[CO_N][CORAL_H];           /* [tone][row], row 0 = CORAL_FY - CORAL_H */
@@ -1003,8 +1307,9 @@ typedef struct {
     uint16_t cl_row[CL_TONES][CL_H];
     int8_t   cl_sd[CL_CH][CL_CW];
     uint8_t  cl_dp[CL_CH][(CL_CW + 7) / 8];
-    uint32_t pm[4][CASTLE_ROWS + 12][(CASTLE_MASK_W + 31) / 32];   /* the pieces' masks (2026-10-17): what piece k of the list covers
-                                                                    * in the baked scene (sprite + mound); row 0 = its box's top, bit 0 its left */
+    uint32_t pm[5][VO_H + 4][(CASTLE_MASK_W + 31) / 32];           /* the pieces' masks (2026-10-17): what piece k of the list (PIECES_MAX) covers
+                                                                    * in the baked scene (sprite + mound); row 0 = its box's top, bit 0 its left
+                                                                    * (the volcano, 0.3.9, is the tallest box) */
     uint32_t castle_front[CASTLE_ROWS + 12][(CASTLE_MASK_W + 31) / 32];   /* the castle's front row, centre-relative (castle_put) */
     /* the seahorse's frame scratch (0.3.6): its sprite (a byte a pixel), the
      * tail's distance map and its path - in PSRAM, never the stack or .bss */
@@ -1018,10 +1323,21 @@ typedef struct {
     uint8_t  pk_sprite[PK_CH][PK_CW];                       /* the pumpkin lantern's tones, built once */
     uint16_t pk_row[PK_N][PK_CH * PK_CELL];                 /* its rind tones per row, hazed and dimmed */
     uint8_t  pk_body[PK_CH][PK_CW], pk_hole[PK_CH][PK_CW];  /* the build's grids (internal RAM is spoken for) */
+    uint8_t  vo_sprite[VO_CH][VO_CW];                       /* the bubble volcano's tones (0.3.9), built once */
+    uint16_t vo_row[VO_N][VO_CH * VO_CELL];                 /* its rock tones per row, hazed and dimmed */
+    uint16_t vo_glow[VO_GLOW_MAX];                          /* its lava cells (j * VO_CW + i): redrawn every frame */
+    uint8_t  ur_tones[33 * 37];                              /* the urchin's tone grid, rebuilt a few times a second (2026-10-23) */
+    uint8_t  cr_tones[50 * 25], cr_parts[50 * 25];          /* the strawberry crab's (0.3.9): its tones and parts, rebuilt when its pose changes (CR_GW x CR_GH) */
+    uint8_t  cr_card_tones[50 * 25], cr_card_parts[50 * 25]; /* its card's portrait, the roost (the tank's grid may hold a profile) */
+    uint8_t  sn_tones[19 * 37];                              /* the upright snail's, likewise */
+    uint16_t shelf_thumb[3][32 * 32];                       /* the shelf's little tanks (0.3.9): the plant, the coral, the cluster
+                                                             * as they are, 32 x 32 (the shop icon's size), box-filtered from a
+                                                             * full-size paint (shelf_build); the modal doubles it */
 } decor_scratch_t;
 static decor_scratch_t *g_ds;
 static bool  g_pk_built;                          /* the pumpkin's sprite is in the scratch */
 static float g_pk_dim = -1;                       /* the dim its rind rows were tinted for */
+static int   g_pk_dzk = 99;                       /* and the shift (its depth) */
 size_t render_decor_scratch_size(void) { return sizeof(decor_scratch_t); }
 static float g_sng_heading;
 void   render_set_decor_scratch(void *buf) { g_ds = (decor_scratch_t *)buf; if (g_ds) memset(g_ds, 0, sizeof *g_ds); g_coral_q = -1; g_coral_rgb = 1; g_sng_heading = 1e9f; g_pk_built = false; g_pk_dim = -1; }
@@ -1130,7 +1446,8 @@ int render_coral_cells(float growth) {                       /* the selftest: ho
     return g_coral_cells;
 }
 static void coral_tint_fill(uint32_t rgb, float dim) {
-    if (g_coral_rgb == rgb && g_coral_dim == dim) return;
+    if (g_coral_rgb == rgb && g_coral_dim == dim && g_coral_dzk == g_dz_coral) return;
+    float haze = decor_haze(0.90f, g_dz_coral);
     uint32_t tone[CO_N];
     tone[CO_NONE]  = 0;
     tone[CO_RIM]   = mix(rgb, 0x30060e, 0.58f);
@@ -1141,9 +1458,9 @@ static void coral_tint_fill(uint32_t rgb, float dim) {
     for (int r = 0; r < CORAL_H; r++) {
         int y = CORAL_FY - CORAL_H + r;
         uint32_t w = water_rgb(y < 0 ? 0 : y >= TANK_H ? TANK_H - 1 : y);
-        for (int k = 1; k < CO_N; k++) ds()->co_row[k][r] = rgb565(mix(w, tone[k], k == CO_TIP ? 0.94f : 0.90f), dim);   /* a light haze: the art's colour stays saturated */
+        for (int k = 1; k < CO_N; k++) ds()->co_row[k][r] = rgb565(mix(w, tone[k], k == CO_TIP ? haze + 0.04f : haze), dim);   /* a light haze: the art's colour stays saturated */
     }
-    g_coral_rgb = rgb; g_coral_dim = dim;
+    g_coral_rgb = rgb; g_coral_dim = dim; g_coral_dzk = g_dz_coral;
 }
 /* the crown (2026-09-23, Strato: "after it's fully grown it should sprout a
  * ring of delicate tentacles out of the top"): CORAL_TENT one-pixel
@@ -1203,8 +1520,8 @@ static void draw_coral_crown(ctx_t *c, int cx, uint32_t rgb, float growth, float
  * drawn AFTER the piece so its bottom rows are buried - the coral's trunk
  * and the cluster's rock grow out of the floor instead of standing on it.
  * final: vignetted and untagged here (the scene-cache path). */
-static void draw_floor_mound(ctx_t *c, int cx, int half_w, int rise, bool final) {
-    const int fl = TANK_BOT - 14;                                          /* the floor line: the pebbles' highest top */
+static void draw_floor_mound(ctx_t *c, int cx, int half_w, int rise, int dz, bool final) {
+    const int fl = TANK_BOT - 14 + dz;                                     /* the floor line: the pebbles' highest top, on the piece's depth (0.3.9) */
     for (int y = fl - rise; y <= fl + 4; y++) {
         if (y < 0 || y >= TANK_H) continue;
         float w = ell_half((y - (fl + 2)) / (float)(rise + 2));           /* an ellipse whose crest is `rise` px above the floor line */
@@ -1219,7 +1536,7 @@ static void draw_floor_mound(ctx_t *c, int cx, int half_w, int rise, bool final)
             if (up > 0) col = mix(col, 0x56684f, 0.25f + 0.40f * up);   /* the hump rises into the light; its skirt is the floor */
             if (up > 0.15f && (chash(x, y) & 15) == 0) col = 0x6e7f66;   /* a few lit grains */
             uint16_t *p = &CTX_PX(c, x, y);
-            *p = rgb565(col, c->dim);
+            *p = FB_SWAP16(rgb565(col, c->dim)); TOUCH_PX(c, x, y);
             rec_px(x, y);
             if (final) {
                 PK_LIGHT_PX(p, x, y);
@@ -1250,7 +1567,7 @@ static void draw_coral(ctx_t *c, int cx, uint32_t rgb, float growth, bool final)
                     int x = x0 + i * CORAL_CELL + dx;
                     if (!CTX_IN(c, x, y)) continue;
                     uint16_t *p = &CTX_PX(c, x, y);
-                    *p = v;
+                    *p = FB_SWAP16(v); TOUCH_PX(c, x, y);
                     rec_px(x, y);
                     if (final) {
                         PK_LIGHT_PX(p, x, y);
@@ -1261,7 +1578,7 @@ static void draw_coral(ctx_t *c, int cx, uint32_t rgb, float growth, bool final)
                 }
             }
         }
-    draw_floor_mound(c, cx, CORAL_HALF_W - 4, 9, final);              /* anchored: the trunk grows out of a hump of stones */
+    draw_floor_mound(c, cx, CORAL_HALF_W - 4, 9, g_dz_coral, final);              /* anchored: the trunk grows out of a hump of stones */
 }
 
 /* ---- the pumpkin lantern, procedural (0.3.6, SD_ITEM_PUMPKIN: the first
@@ -1290,7 +1607,7 @@ enum { PK_NONE = 0, PK_RIM, PK_SHADE, PK_BODY, PK_LIT, PK_GLEAM, PK_GROOVE,
 #define PK_EMIT  PK_CUT
 #define PK_W     (PK_CW * PK_CELL)
 #define PK_H     (PK_CH * PK_CELL)
-#define PK_FY    (TANK_BOT - 14 + DECOR_SINK)                   /* the base, sunk into the pebbles */
+#define PK_FY    (TANK_BOT - 14 + DECOR_SINK + g_dz_pk)         /* the base, sunk into the pebbles; on its depth's line (0.3.9) */
 #define PK_S     1.2f                                           /* the drawing's units (below) per cell: the art is laid
                                                                  * out on a 36 x 34 grid and scaled up to PK_CW x PK_CH */
 #define PK_MID   18.0f                                          /* the body's centre column, in drawing units */
@@ -1405,8 +1722,9 @@ int render_pumpkin_px(int *glow) {                               /* its pixels, 
 /* the rind's rows: hazed with the water like the coral's, dimmed - and at
  * night dimmed less (the shell is lit a little from within) and warmed */
 static void pk_tint_fill(float dim) {
-    if (g_pk_dim == dim) return;
+    if (g_pk_dim == dim && g_pk_dzk == g_dz_pk) return;
     bool night = dim < 1.0f;
+    float haze = decor_haze(0.90f, g_dz_pk);
     float rd = night ? 0.62f : 1.0f;
     for (int r = 0; r < PK_H; r++) {
         int y = PK_FY - PK_H + r;
@@ -1414,10 +1732,10 @@ static void pk_tint_fill(float dim) {
         for (int k = 1; k < PK_EMIT; k++) {
             uint32_t col = PK_RGB[k];
             if (night && k < PK_STEM_D) col = mix(col, 0xff6a10, 0.18f);
-            ds()->pk_row[k][r] = rgb565(mix(w, col, 0.90f), k >= PK_STEM_D ? dim : rd);
+            ds()->pk_row[k][r] = rgb565(mix(w, col, haze), k >= PK_STEM_D ? dim : rd);
         }
     }
-    g_pk_dim = dim;
+    g_pk_dim = dim; g_pk_dzk = g_dz_pk;
 }
 /* the candle this frame: a level 0.78..1.0 from a few incommensurate beats,
  * with now and then a deeper gutter */
@@ -1471,7 +1789,31 @@ static void arch_shade(ctx_t *c, int kc, int cx, bool night, bool over_check) {
         for (int x = cx - CASTLE_ARCH_R; x <= cx + CASTLE_ARCH_R; x++) {
             if (!CTX_IN(c, x, y) || !castle_arch_at(cx, x, y)) continue;
             if (over_check && pc_covered_above(kc, x, y)) continue;
-            px_darken(&CTX_PX(c, x, y), a);
+            px_darken(&CTX_PX(c, x, y), a); TOUCH_PX(c, x, y);
+        }
+    }
+}
+/* a castle IN FRONT that is in the scene: the bake shaded the tunnel (pc_draw),
+ * so each frame only what was DRAWN in it - a fish, a frond of the early
+ * arch pass, a bubble - takes the shade (2026-10-23: the whole opening was
+ * re-shaded every frame, 2.9 ms of a square frame) */
+static void arch_shade_dirty(ctx_t *c, int kc, int cx, bool night) {
+    if (night && g_pk_under_castle && g_pk_lx >= 0) return;
+    if (!g_dirty) { arch_shade(c, kc, cx, night, true); return; }
+    int x0 = cx - CASTLE_ARCH_R, x1 = cx + CASTLE_ARCH_R;
+    int wa = (x0 < 0 ? 0 : x0) >> 5, wb = (x1 > TANK_W - 1 ? TANK_W - 1 : x1) >> 5;
+    for (int y = CASTLE_FY - CASTLE_ARCH_S - CASTLE_ARCH_R; y <= CASTLE_FY; y++) {
+        if ((unsigned)y >= (unsigned)TANK_H) continue;
+        int a = arch_shade_alpha(y, night);
+        const uint32_t *drow = g_dirty + y * DIRTY_WORDS_PER_ROW;
+        for (int w = wa; w <= wb; w++) {
+            uint32_t bits = drow[w];
+            while (bits) {
+                int x = (w << 5) + __builtin_ctz(bits); bits &= bits - 1;
+                if (x < x0 || x > x1 || !CTX_IN(c, x, y) || !castle_arch_at(cx, x, y)) continue;
+                if (pc_covered_above(kc, x, y)) continue;
+                px_darken(&CTX_PX(c, x, y), a);
+            }
         }
     }
 }
@@ -1481,12 +1823,12 @@ static bool castle_open(int x, int y) {
         float half = y > ys ? CASTLE_ARCH_R : CASTLE_ARCH_R * ell_half((ys - y) / (float)CASTLE_ARCH_R);
         if (half >= 1 && lx >= (int)(-half + 0.5f) && lx <= (int)(half - 0.5f)) return true;
     }
-    static const struct { int lxc, w, top, bot; } W[4] = {                 /* castle_front_row's and the keep's windows */
-        { 39, 7, CASTLE_FY - 92, CASTLE_FY - 78 }, { -48, 7, CASTLE_FY - 62, CASTLE_FY - 48 },
-        { -73, 6, CASTLE_FY - 30, CASTLE_FY - 19 }, { 71, 7, CASTLE_FY - 44, CASTLE_FY - 30 } };
+    static const struct { int lxc, w, top, bot; } W[4] = {                 /* castle_front_row's and the keep's windows (rows up from CASTLE_FY) */
+        { 39, 7, 92, 78 }, { -48, 7, 62, 48 }, { -73, 6, 30, 19 }, { 71, 7, 44, 30 } };
     for (int k = 0; k < 4; k++) {
-        if (y < W[k].top || y > W[k].bot) continue;
-        float r = W[k].w / 2.0f, dy = (W[k].top + r) - y, half = dy > 0 ? r * ell_half(dy / r) : r;
+        int top = CASTLE_FY - W[k].top, bot = CASTLE_FY - W[k].bot;
+        if (y < top || y > bot) continue;
+        float r = W[k].w / 2.0f, dy = (top + r) - y, half = dy > 0 ? r * ell_half(dy / r) : r;
         if (lx >= (int)(W[k].lxc - half + 0.5f) && lx <= (int)(W[k].lxc + half - 0.5f)) return true;
     }
     return false;
@@ -1546,12 +1888,17 @@ static void pk_casts(const tank_t *t, int pkx) {
     }
     pk_casts_pieces(t);
 }
+static const tank_t *g_cr_guard;                          /* a crab in the FRONT SLOT (before a piece IN FRONT, in a front volcano's cave, on its flank): the
+                                                             per-frame overlays - the volcano's lava and embers, the pumpkin's face and flame - keep off it
+                                                             (docs/render-stack.md; the matrix found the pumpkin's face painted over a crab walking past) */
+static bool crab_covers(const tank_t *t, int x, int y);
 static inline void pk_store(ctx_t *c, int x, int y, uint16_t v, bool final) {
-    if (!CTX_IN(c, x, y)) return;
+    if (!CTX_IN(c, x, y) || under_bg(x, y)) return;
     if (g_pk_k >= 0 && pc_covered_above(g_pk_k, x, y)) return;   /* under a piece above it (the castle's stone, a coral IN FRONT, ...) */
+    if (g_cr_guard && crab_covers(g_cr_guard, x, y)) return;     /* the crab in the front slot before the lantern: its face stays under the crab */
     uint16_t *p = &CTX_PX(c, x, y);
     rec_px(x, y);
-    *p = v;
+    *p = FB_SWAP16(v); TOUCH_PX(c, x, y);
     if (final) {
         static int ky = -1, kx = -1, ka;       /* one vignette alpha per 8 px of a row, computed (the PSRAM LUT costs a cache line a read) */
         if (y != ky || (x >> 3) != kx) { ky = y; kx = x >> 3; ka = vig_alpha((x & ~7) + 4, y); }
@@ -1612,12 +1959,13 @@ static void pk_halo(uint16_t *sc) {
             int lr = rgb[i][0] * inv >> 8, lg = rgb[i][1] * inv >> 8, lb = rgb[i][2] * inv >> 8;
             uint16_t *p = &sc[y * TANK_W + x];
             int d = bayer[y & 3][x & 3];
-            int rr = (((*p >> 11) & 31) << 3) + 4 + lr, gg = (((*p >> 5) & 63) << 2) + 2 + lg, bb = ((*p & 31) << 3) + 4 + lb;
+            uint16_t cur = FB_SWAP16(*p);
+            int rr = (((cur >> 11) & 31) << 3) + 4 + lr, gg = (((cur >> 5) & 63) << 2) + 2 + lg, bb = ((cur & 31) << 3) + 4 + lb;
             int r5 = (rr + (d >> 1) - 4) >> 3, g6 = (gg + (d >> 2) - 2) >> 2, b5 = (bb + (d >> 1) - 4) >> 3;
             if (r5 > 31) r5 = 31;
             if (g6 > 63) g6 = 63;
             if (b5 > 31) b5 = 31;
-            *p = (uint16_t)((r5 << 11) | (g6 << 5) | b5);
+            *p = FB_SWAP16((uint16_t)((r5 << 11) | (g6 << 5) | b5));
         }
 }
 /* every frame, before the vignette sweep: what was painted live in the
@@ -1637,7 +1985,7 @@ static void pk_light_dirty(ctx_t *c) {
                 int x = (w << 5) + __builtin_ctz(bits); bits &= bits - 1;
                 if (x < x0 || x > x1) continue;
                 uint32_t l = pk_light_at(x, y);
-                if (l) { uint16_t *p = &c->fb[y * c->stride + x]; *p = px_lit(*p, l); }
+                if (l) { uint16_t *p = &c->fb[y * c->stride + x]; *p = FB_SWAP16(px_lit(FB_SWAP16(*p), l)); }
             }
         }
     }
@@ -1659,7 +2007,326 @@ static void draw_pumpkin(ctx_t *c, int cx, bool night, float clock, bool steady,
             }
         }
     draw_pumpkin_glow(c, cx, clock, night, steady, final);
-    if (mound) draw_floor_mound(c, cx, PK_W / 2 - 4, 5, final);
+    if (mound) draw_floor_mound(c, cx, PK_W / 2 - 4, 5, g_dz_pk, final);
+}
+
+/* ---- the bubble volcano, procedural (0.3.9; DonB's #ideas thread of
+ * 2026-10-22, four keepers' 🦐: "a bubble volcano (think Finding Nemo) that
+ * could maybe have glowing red bubbles visible when tank lights are low";
+ * the reference is working-assets/volcano/Volcano Sprite.png: a cone of
+ * stacked purple-gray boulders, a lava pool in the crater, orange cracks
+ * down the flanks, a cave mouth at the foot lit from inside, moss on the
+ * lower rocks, lit bubbles climbing from the crater). Built ONCE as a tone
+ * sprite on a 2 px cell grid like the lantern's: the cone's silhouette from
+ * a profile with a jagged edge, the boulders from the nearest of a jittered
+ * grid of points (a crevice where two are as near), lit from the upper left
+ * like every piece, the cracks as capsule chains down from the pool, the
+ * moss by the castle's rule. The ROCK is baked, hazed and dimmed with the
+ * water per row; the LAVA (the pool, the cracks, the cave's floor) is
+ * emissive - its own tones, no dim - and is redrawn every frame with a slow
+ * breathing flicker; the BUBBLES rise live from the pool, lit orbs that cool
+ * from yellow to red and fade out over ~100 px - by night, the tank's embers.
+ * About the castle's width (184 px) and taller (~200 px over the floor). */
+#define VO_FY   (TANK_BOT - 16 + g_dz_vo)               /* the sprite's bottom row: the back line (the castle's), shifted to its depth's (0.3.9) */
+#define VO_MID  46.0f                                   /* the cone's axis, in cells */
+#define VO_BASE 4.0f                                    /* the cone's foot, cell rows up from the sprite's bottom */
+#define VO_TOP  100.0f                                  /* the far rim's top */
+#define VO_POOL_Y 93.0f                                 /* the lava pool's centre row */
+#define VO_POOL_RX 9.5f
+#define VO_POOL_RY 3.2f
+#define VO_EMIT VO_CAVE_LIT
+#define VO_NB   7                                       /* bubbles in the air at once */
+#define VO_RISE 104                                     /* how far a bubble climbs before it fades, px */
+static const uint32_t VO_RGB[VO_N] = {
+    0, 0x74667a, 0x52475a, 0x362e3d, 0x1c1620, 0x5a2e28, 0x7aa33c, 0x527f2e, 0x1e0c0c, 0x48180e,
+    0x9a3012, 0xc04012, 0xf26a1c, 0xffa826, 0xffe070 };
+static const uint32_t VO_RGB_NIGHT[VO_N] = {                    /* the lava with the light off: brighter, it has the tank to itself */
+    [VO_CAVE_LIT] = 0xb8380e, [VO_LAVA_DIM] = 0xd84810, [VO_LAVA] = 0xff7a1e, [VO_LAVA_HOT] = 0xffbc38, [VO_LAVA_CORE] = 0xfff2a8 };
+static bool  g_vo_built;
+static float g_vo_dim = -1;
+static int   g_vo_dzk = 99;
+static int   g_vo_cells, g_vo_glow_n;
+static int   g_vo_style;                                        /* 0 stacked boulders (Strato's pick 10-23), 1 smooth rock (the sim's PT_VOLCANO_SMOOTH, kept for a look) */
+void render_set_volcano_style(int style) { if (style != g_vo_style) { g_vo_style = style; g_vo_built = false; } }
+/* smooth value noise on an 8-cell grid, -1..1 (the smooth rock's shading) */
+static float vo_noise(float px, float py, int seed) {
+    float gx = px / 8.0f, gy = py / 8.0f;
+    int i0 = (int)floorf(gx), j0 = (int)floorf(gy);
+    float fx = gx - i0, fy = gy - j0;
+    fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy);
+#define VO_NV(i, j) (((chash((i) + (seed), (j) - (seed)) & 1023) / 511.5f) - 1.0f)
+    return (VO_NV(i0, j0) * (1 - fx) + VO_NV(i0 + 1, j0) * fx) * (1 - fy) + (VO_NV(i0, j0 + 1) * (1 - fx) + VO_NV(i0 + 1, j0 + 1) * fx) * fy;
+#undef VO_NV
+}
+/* the cone's half width at cell row y, per side (s = -1 left, +1 right): a
+ * cone that leans a little, a shoulder on the left, lumps and a rough edge */
+static float vo_half(float y, int s) {
+    float u = (y - VO_BASE) / (VO_TOP - VO_BASE);
+    if (u < 0) u = 0;
+    if (u > 1) u = 1;
+    float h = 11.0f + 35.0f * powf(1 - u, 0.85f);
+    float g = s < 0 ? (u - 0.32f) / 0.16f : (u - 0.58f) / 0.12f;
+    h += (s < 0 ? 5.0f : 2.5f) * expf(-g * g);
+    h += 1.2f * fast_sin(y * 0.47f + (s < 0 ? 0.3f : 2.1f) + 8 * TAU) + 0.8f * fast_sin(y * 0.19f + (s < 0 ? 1.7f : 0.2f) + 8 * TAU);
+    h += (float)((int)(chash((int)y >> 2, s + 5) % 3) - 1) * 0.6f;
+    return h;
+}
+/* the boulders: the nearest two of a jittered grid of points (Worley), the
+ * nearest's centre and hash for its lighting and its own shade */
+#define VO_GX 7.5f
+#define VO_GY 6.0f
+static void vo_boulder(float px, float py, float *d1, float *d2, float *fx, float *fy, uint32_t *fh) {
+    int gi = (int)floorf(px / VO_GX), gj = (int)floorf(py / VO_GY);
+    *d1 = *d2 = 1e9f; *fx = *fy = 0; *fh = 0;
+    for (int dj = -1; dj <= 1; dj++)
+        for (int di = -1; di <= 1; di++) {
+            int ci = gi + di, cj = gj + dj;
+            uint32_t h = chash(ci + 31, cj + 17);
+            float cx = (ci + 0.5f + (((h >> 3) & 255) / 255.0f - 0.5f) * 0.8f) * VO_GX;
+            float cy = (cj + 0.5f + (((h >> 11) & 255) / 255.0f - 0.5f) * 0.8f) * VO_GY;
+            float ex = px - cx, ey = (py - cy) * 1.2f, d = sqrtf(ex * ex + ey * ey);
+            if (d < *d1) { *d2 = *d1; *d1 = d; *fx = cx; *fy = cy; *fh = h; }
+            else if (d < *d2) *d2 = d;
+        }
+}
+/* signed distance to a chain of capsules (dx from the axis, y pairs), its
+ * width tapering w0 -> w1 along the chain */
+static float vo_chain_sd(float px, float py, const int8_t *p, int n, float w0, float w1) {
+    float best = 1e9f;
+    for (int i = 0; i + 1 < n; i++) {
+        float ax = VO_MID + p[2 * i], ay = p[2 * i + 1], bx = VO_MID + p[2 * i + 2], by = p[2 * i + 3];
+        float dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
+        float u = ((px - ax) * dx + (py - ay) * dy) / len2;
+        if (u < 0) u = 0;
+        if (u > 1) u = 1;
+        float ex = px - (ax + dx * u), ey = py - (ay + dy * u);
+        float w = w0 + (w1 - w0) * ((i + u) / (n - 1));
+        float d = sqrtf(ex * ex + ey * ey) - w;
+        if (d < best) best = d;
+    }
+    return best;
+}
+static void vo_build(void) {
+    uint8_t (*sp)[VO_CW] = ds()->vo_sprite;
+    static const int8_t CA[] = { -5, 90, -8, 80, -6, 70, -10, 58, -8, 47, -11, 36 };    /* the cracks, from the pool's lip down */
+    static const int8_t CB[] = { 5, 90, 8, 80, 6, 70, 10, 58, 9, 46, 13, 34 };
+    static const int8_t CC[] = { -1, 89, 1, 78, -2, 67, 0, 59 };
+    static const int8_t CD[] = { 9, 88, 14, 76, 12, 64, 16, 52 };
+    static const struct { int8_t x, y, rx, ry; } BO[6] = {                           /* the boulders at the foot */
+        { -40, 6, 9, 5 }, { -29, 4, 7, 4 }, { 38, 6, 10, 5 }, { 27, 3, 6, 4 }, { -47, 3, 6, 3 }, { 47, 3, 6, 3 } };
+    for (int j = 0; j < VO_CH; j++)
+        for (int i = 0; i < VO_CW; i++) {
+            float px = i + 0.5f, py = (VO_CH - 1 - j) + 0.5f;
+            uint8_t t = VO_NONE;
+            bool rock = false; float nx = 0;
+            if (py >= VO_BASE) {                                                   /* the cone */
+                int s = px < VO_MID ? -1 : 1;
+                float half = vo_half(py, s);
+                if (py > 94) half -= (py - 94) * 0.9f;                             /* the far rim narrows behind the pool */
+                if (fabsf(px - VO_MID) <= half && py <= VO_TOP + 0.5f) { rock = true; nx = (px - VO_MID) / half; }
+            }
+            if (!rock && py < 8) {                                                 /* the rubble skirt */
+                float w = ell_half((py - 3.0f) / 4.8f);
+                if (w > 0 && fabsf(px - VO_MID) <= 49 * w) { rock = true; nx = (px - VO_MID) / 49.0f; }
+            }
+            if (rock) {
+                float u = (py - VO_BASE) / (VO_TOP - VO_BASE);
+                if (u < 0) u = 0;
+                if (g_vo_style == 0) {                                             /* stacked boulders */
+                    float d1, d2, fx, fy; uint32_t fh;
+                    vo_boulder(px, py, &d1, &d2, &fx, &fy, &fh);
+                    float lx = (px - fx) / 4.0f, ly = (py - fy) / 4.0f;
+                    float lit = -0.62f * nx + 0.5f * (-lx * 0.45f + ly * 0.85f) + (((fh >> 19) & 15) / 15.0f - 0.5f) * 0.4f;
+                    t = lit > 0.42f ? VO_ROCK_L : lit > -0.18f ? VO_ROCK : VO_ROCK_D;
+                    if (d2 - d1 < 0.9f) t = VO_ROCK_DD;                            /* the crevice between two boulders */
+                    else if ((chash(i + 300, j + 300) & 15) == 0) t = t == VO_ROCK_L ? VO_ROCK : t == VO_ROCK ? VO_ROCK_D : VO_ROCK_DD;   /* a mottle */
+                } else {                                                           /* smooth rock: the cone's shading, soft lumps, faint ledges */
+                    float nz = 0.6f * vo_noise(px, py, 3) + 0.3f * vo_noise(px * 2, py * 2, 7);
+                    float lit = -0.62f * nx + 0.12f + 0.35f * nz + ((chash(i + 900, j + 900) & 7) / 7.0f - 0.5f) * 0.16f;   /* a soft edge between the tones */
+                    t = lit > 0.40f ? VO_ROCK_L : lit > -0.12f ? VO_ROCK : lit > -0.55f ? VO_ROCK_D : VO_ROCK_DD;
+                    float st = py * 0.75f + 2.0f * vo_noise(px * 0.7f, py * 0.7f, 11);
+                    if (st - floorf(st / 7.0f) * 7.0f < 0.55f) t = t == VO_ROCK_L ? VO_ROCK : t == VO_ROCK ? VO_ROCK_D : VO_ROCK_DD;   /* a ledge's underside */
+                }
+                if (u < 0.5f && t != VO_ROCK_DD) {                                 /* moss creeps up from the foot */
+                    int p = (int)(40 * (1 - u / 0.5f));
+                    if ((int)(chash(i >> 1, j >> 1) % 100) < p && (chash(i + 7, j + 3) & 3) != 0)
+                        t = (chash(i >> 1, (j >> 1) + 99) & 1) ? VO_MOSS_A : VO_MOSS_B;
+                }
+            }
+            for (int b = 0; b < 6; b++) {                                          /* the boulders over the foot */
+                float ex = (px - (VO_MID + BO[b].x)) / BO[b].rx, ey = (py - BO[b].y) / BO[b].ry, e = ex * ex + ey * ey;
+                if (e > 1) continue;
+                float lit = -ex * 0.5f + ey * 0.8f;
+                t = e > 0.72f && (ex > 0.2f || ey < -0.2f) ? VO_ROCK_DD : lit > 0.35f ? VO_ROCK_L : lit > -0.2f ? VO_ROCK : VO_ROCK_D;
+                if (ey > 0.3f && (chash(i + 50, j + 50) % 5) == 0) t = VO_MOSS_A;
+                rock = true;
+            }
+            if (rock) {                                                            /* the cave mouth: a vault at the foot, lit from its floor */
+                float spring = VO_BASE + 10, R = 13.0f;
+                float ch = py <= spring ? R : R * ell_half((py - spring) / R);
+                float jag = (chash((int)py, 9) & 1) ? 0.6f : 0;
+                if (py >= VO_BASE + 2 && ch >= 0.5f && fabsf(px - VO_MID) <= ch + jag) {   /* its floor at the sand line, not under it */
+                    float dy = py - VO_BASE - 2, in = ch - fabsf(px - VO_MID);   /* the floor glows, feathered up and toward the jambs */
+                    int g = (int)(chash(i + 11, j + 5) % 100);
+                    t = dy < 1.5f && in > 1.5f ? VO_CAVE_LIT : dy < 3.5f && in > 2.5f && g < 55 - (int)(dy * 10) ? VO_CAVE_LIT
+                      : dy < 6.5f && g < 80 - (int)(dy * 9) ? VO_CAVE_MID : VO_CAVE;
+                }
+            }
+            if (rock && t < VO_CAVE) {                                             /* the pool and the cracks, over the rock */
+                float sd = vo_chain_sd(px, py, CA, 6, 0.8f, 0.45f), s2;
+                if ((s2 = vo_chain_sd(px, py, CB, 6, 0.8f, 0.45f)) < sd) sd = s2;
+                if ((s2 = vo_chain_sd(px, py, CC, 4, 0.75f, 0.45f)) < sd) sd = s2;
+                if ((s2 = vo_chain_sd(px, py, CD, 4, 0.75f, 0.45f)) < sd) sd = s2;
+                float ex = (px - VO_MID) / VO_POOL_RX, ey = (py - VO_POOL_Y) / VO_POOL_RY, e = ex * ex + ey * ey;
+                if (e <= 1) t = ey > 0.3f ? VO_LAVA : e < 0.28f ? VO_LAVA_CORE : e < 0.7f || ey < -0.45f ? VO_LAVA_HOT : VO_LAVA;   /* the far side darker, the near lip bright */
+                else if (sd < 0) t = py > 82 ? VO_LAVA_HOT : py > 58 ? VO_LAVA : VO_LAVA_DIM;
+                else if (sd < 1.0f || e < 1.45f) t = VO_SCORCH;                    /* the rock at a crack's edge, scorched */
+            }
+            sp[j][i] = t;
+        }
+    /* the lip over the cave catches the light; the counts and the lava's cell list */
+    g_vo_cells = g_vo_glow_n = 0;
+    for (int j = 0; j < VO_CH; j++)
+        for (int i = 0; i < VO_CW; i++) {
+            uint8_t t = sp[j][i];
+            if (t >= VO_ROCK_L && t <= VO_ROCK_D && j + 1 < VO_CH && sp[j + 1][i] >= VO_CAVE && sp[j + 1][i] <= VO_CAVE_LIT) sp[j][i] = t = VO_ROCK_L;
+            g_vo_cells += t != VO_NONE;
+            if (t >= VO_EMIT && g_vo_glow_n < VO_GLOW_MAX) ds()->vo_glow[g_vo_glow_n++] = (uint16_t)(j * VO_CW + i);
+        }
+    g_vo_built = true;
+}
+int render_volcano_px(int *glow) {                               /* its pixels, and how many are redrawn a frame (the lava; the bubbles apart) */
+    if (!g_vo_built) vo_build();
+    if (glow) *glow = g_vo_glow_n * VO_CELL * VO_CELL;
+    return g_vo_cells * VO_CELL * VO_CELL;
+}
+/* the rock's rows: hazed with the water like the castle's stone and dimmed;
+ * by night the rows near the crater take a warm cast from the lava */
+static void vo_tint_fill(float dim) {
+    if (g_vo_dim == dim && g_vo_dzk == g_dz_vo) return;
+    bool night = dim < 1.0f;
+    float haze = decor_haze(0.88f, g_dz_vo);
+    for (int r = 0; r < VO_H; r++) {
+        int y = VO_FY - VO_H + r;
+        uint32_t w = water_rgb(y < 0 ? 0 : y >= TANK_H ? TANK_H - 1 : y);
+        float warm = night ? 0.22f * (1 - r / 40.0f) : 0;
+        for (int k = 1; k < VO_EMIT; k++) {
+            uint32_t col = VO_RGB[k];
+            if (warm > 0) col = mix(col, 0xff5a10, warm);
+            ds()->vo_row[k][r] = rgb565(mix(w, col, haze), dim);
+        }
+    }
+    g_vo_dim = dim; g_vo_dzk = g_dz_vo;
+}
+static inline void vo_store(ctx_t *c, int x, int y, uint16_t v, bool final) {
+    if (!CTX_IN(c, x, y) || under_bg(x, y)) return;
+    if (g_clip_k >= 0 && pc_covered_above(g_clip_k, x, y)) return;   /* under a piece above it */
+    if (g_cr_guard && crab_covers(g_cr_guard, x, y)) return;         /* the crab in its cave: the embers stay under it (Strato, the pendant) */
+    rec_px(x, y);
+    uint16_t *p = &CTX_PX(c, x, y);
+    *p = FB_SWAP16(v); TOUCH_PX(c, x, y);
+    if (final) {
+        PK_LIGHT_PX(p, x, y);
+        int a = g_vig ? g_vig[y * TANK_W + x] : vig_alpha(x, y);
+        if (a) px_darken(p, a);
+        if (g_dirty) g_dirty[y * DIRTY_WORDS_PER_ROW + (x >> 5)] &= ~(1u << (x & 31));
+    } else dirty_px(x, y);
+}
+/* the lava breathes: a level 0.84..1.0 from two slow beats and a faster shimmer */
+static float vo_flicker(float clock) {
+    return 0.93f + 0.04f * fast_sin(clock * 2.7f + 8 * TAU) + 0.025f * fast_sin(clock * 0.9f + 1.1f + 8 * TAU) + 0.015f * fast_sin(clock * 9.3f + 0.4f + 8 * TAU);
+}
+/* the lava this frame: the pool, the cracks and the cave's floor, over the
+ * baked rock (and in the bake, at the steady level) */
+static void draw_volcano_glow(ctx_t *c, int cx, float clock, bool night, bool steady, bool final) {
+    if (!g_vo_built) vo_build();
+    float f = steady ? 0.95f : vo_flicker(clock);
+    uint16_t v[VO_N];
+    for (int k = VO_EMIT; k < VO_N; k++) {
+        float lv = f * (k == VO_LAVA_CORE ? 1.04f : k == VO_CAVE_LIT ? 0.92f : 1.0f);
+        v[k] = rgb565(night ? VO_RGB_NIGHT[k] : VO_RGB[k], lv > 1 ? 1 : lv);
+    }
+    int x0 = cx - VO_W / 2, y0 = VO_FY - VO_H;
+    const uint16_t *g = ds()->vo_glow;
+    for (int n = 0; n < g_vo_glow_n; n++) {
+        int j = g[n] / VO_CW, i = g[n] % VO_CW;
+        uint8_t t = ds()->vo_sprite[j][i];
+        for (int dy = 0; dy < VO_CELL; dy++)
+            for (int dx = 0; dx < VO_CELL; dx++) vo_store(c, x0 + i * VO_CELL + dx, y0 + j * VO_CELL + dy, v[t], final);
+    }
+}
+/* the volcano at centre x: the rock, then the lava at its steady level */
+static void draw_volcano(ctx_t *c, int cx, bool night, bool final) {
+    if (!g_vo_built) vo_build();
+    vo_tint_fill(c->dim);
+    int x0 = cx - VO_W / 2, y0 = VO_FY - VO_H;
+    for (int j = 0; j < VO_CH; j++)
+        for (int i = 0; i < VO_CW; i++) {
+            uint8_t t = ds()->vo_sprite[j][i];
+            if (!t || t >= VO_EMIT) continue;
+            for (int dy = 0; dy < VO_CELL; dy++) {
+                uint16_t v = ds()->vo_row[t][j * VO_CELL + dy];
+                for (int dx = 0; dx < VO_CELL; dx++) vo_store(c, x0 + i * VO_CELL + dx, y0 + j * VO_CELL + dy, v, final);
+            }
+        }
+    draw_volcano_glow(c, cx, 0, night, true, final);
+}
+/* the bubbles: VO_NB in the air, each on its own period and phase, rising
+ * from the pool, wobbling, swelling as they climb, cooling from yellow to a
+ * dull red and shrinking away at the top. By night their own light (no dim)
+ * with a soft ring. Returns their box for the vignette sweep. */
+static void draw_volcano_bubbles(ctx_t *c, int cx, float clock, bool night, int *bx0, int *by0, int *bx1, int *by1) {
+    ctx_t ce = *c;
+    if (night) ce.dim = 1.0f;
+    float py = VO_FY - VO_H + (VO_CH - VO_POOL_Y) * VO_CELL;
+    for (int k = 0; k < VO_NB; k++) {
+        float P = 2.9f + 0.41f * k, ph = clock / P + k * 0.618f;
+        ph -= floorf(ph);
+        float y = py - ph * VO_RISE;
+        float x = cx + (k % 3 - 1) * 5.0f * ph + 3.5f * ph * fast_sin(clock * 1.3f + k * 2.1f + 8 * TAU);
+        float r = 1.7f + 1.5f * ph;
+        if (ph > 0.84f) r *= (1 - ph) / 0.16f;
+        if (r < 0.6f) continue;
+        uint32_t col = ph < 0.35f ? mix(0xffd060, 0xf8862a, ph / 0.35f) : ph < 0.7f ? mix(0xf8862a, 0xe04818, (ph - 0.35f) / 0.35f) : mix(0xe04818, 0xa02810, (ph - 0.7f) / 0.3f);
+        if (night) fill_ellipse(&ce, x, y, r + 1.2f, r + 1.2f, col, 50);
+        fill_ellipse(&ce, x, y, r, r, col, night ? 255 : 230);
+        px_blend(&ce, (int)(x - r * 0.4f), (int)(y - r * 0.4f), 0xfff2c0, 150);
+    }
+    *bx0 = cx - 18; *bx1 = cx + 18; *by0 = (int)py - VO_RISE - 6; *by1 = (int)py + 6;
+}
+/* the light it throws with the tank's light off, in the bake: the crater's
+ * on the water above and round it, the cave mouth's on the sand before it,
+ * dithered like the lantern's halo (the fish passing through it are not lit:
+ * the preview) */
+static void vo_halo_src(uint16_t *sc, float lx, float ly, float rx, float ry_up, float ry_dn, int lr, int lg, int lb) {
+    static const uint8_t bayer[4][4] = { {0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5} };
+    int y0 = (int)(ly - ry_up), y1 = (int)(ly + ry_dn), x0 = (int)(lx - rx), x1 = (int)(lx + rx);
+    for (int y = y0; y <= y1; y++) {
+        if ((unsigned)y >= (unsigned)TANK_H) continue;
+        float dy = (y - ly) / (y < ly ? ry_up : ry_dn);
+        for (int x = x0; x <= x1; x++) {
+            if ((unsigned)x >= (unsigned)TANK_W) continue;
+            float dx = (x - lx) / rx, d = sqrtf(dx * dx + dy * dy);
+            if (d >= 1) continue;
+            float f = (1 - d) * (1 - d) * sqrtf(1 - d);
+            int inv = 256 - (g_vig ? g_vig[y * TANK_W + x] : vig_alpha(x, y));
+            int ar = (int)(lr * f) * inv >> 8, ag = (int)(lg * f) * inv >> 8, ab = (int)(lb * f) * inv >> 8;
+            uint16_t *p = &sc[y * TANK_W + x];
+            int dd = bayer[y & 3][x & 3];
+            uint16_t cur = FB_SWAP16(*p);
+            int rr = (((cur >> 11) & 31) << 3) + 4 + ar, gg = (((cur >> 5) & 63) << 2) + 2 + ag, bb = ((cur & 31) << 3) + 4 + ab;
+            int r5 = (rr + (dd >> 1) - 4) >> 3, g6 = (gg + (dd >> 2) - 2) >> 2, b5 = (bb + (dd >> 1) - 4) >> 3;
+            if (r5 > 31) r5 = 31;
+            if (g6 > 63) g6 = 63;
+            if (b5 > 31) b5 = 31;
+            *p = FB_SWAP16((uint16_t)((r5 << 11) | (g6 << 5) | b5));
+        }
+    }
+}
+static void vo_halo(uint16_t *sc, int cx) {
+    float py = VO_FY - VO_H + (VO_CH - VO_POOL_Y) * VO_CELL, cy = VO_FY - VO_H + (VO_CH - VO_BASE - 3) * VO_CELL;
+    vo_halo_src(sc, cx, py, 130, 120, 70, 92, 34, 6);
+    vo_halo_src(sc, cx, cy, 70, 30, 24, 76, 22, 4);
 }
 
 /* ---- the snail, procedural (2026-09-16; Strato: "explore doing the same
@@ -1834,9 +2501,16 @@ static void draw_snail(ctx_t *c, const tank_t *t, bool upright_pass) {
             top[lx + 16] = -(2.4f + 3.2f * powf(sinf(xf < 0 ? 0 : xf > 1 ? 1 : xf * 3.14159f), 0.6f));
             if (lx > 8) { float h = -(4.8f + (lx - 8) * 0.55f); if (h < top[lx + 16]) top[lx + 16] = h; }
         }
+        static float s_t = -1e9f;                                  /* its tones a few times a second, not a frame (2026-10-23) */
+        uint8_t *tn = ds()->sn_tones;
+        if (t->clock - s_t >= 0.08f || t->clock < s_t) {
+            for (int ly = -18; ly <= 0; ly++)
+                for (int lx = -16; lx <= 20; lx++) tn[(ly + 18) * 37 + lx + 16] = (uint8_t)snail_upright_tone(lx, ly, top[lx + 16], t->clock, &sw);
+            s_t = t->clock;
+        }
         for (int ly = -18; ly <= 0; ly++)
             for (int lx = -16; lx <= 20; lx++)
-                snail_put(c, flip ? ox - lx : ox + lx, oy + ly, snail_upright_tone(lx, ly, top[lx + 16], t->clock, &sw), SNAIL_TINT_FLOOR, &row);
+                snail_put(c, flip ? ox - lx : ox + lx, oy + ly, tn[(ly + 18) * 37 + lx + 16], SNAIL_TINT_FLOOR, &row);
     } else {
         float a = t->snail_heading - 1.5708f;                      /* the head points +y locally */
         float ca = cosf(a), sa = sinf(a);
@@ -1952,17 +2626,514 @@ static int urchin_tone(float lx, float ly, const ur_pose_t *p) {
 }
 static void draw_urchin(ctx_t *c, const tank_t *t) {
     if (!(t->sd_unlocks & SD_ITEM_URCHIN) || t->urchin_x < 0) return;
-    ur_pose_t p; urchin_pose(&p, t->clock, tank_urchin_chewing(t));
-    int cx = (int)floorf(t->urchin_x + 0.5f), cy = (int)URCHIN_FLOOR_Y;
+    /* its tones a few times a second, not a frame (2026-10-23: the spines' pose per pixel
+       was 2-3 ms of a square frame); the row's palette once a row, not a pixel */
+    static float s_t = -1e9f; static bool s_chew;
+    bool chew = tank_urchin_chewing(t);
+    uint8_t *tn = ds()->ur_tones;
+    if (t->clock - s_t >= 0.08f || t->clock < s_t || chew != s_chew) {
+        ur_pose_t p; urchin_pose(&p, t->clock, chew);
+        for (int ly = -16; ly <= (int)UR_BASE; ly++)
+            for (int lx = -18; lx <= 18; lx++) tn[(ly + 16) * 37 + lx + 18] = (uint8_t)urchin_tone((float)lx + 0.5f, (float)ly + 0.5f, &p);
+        s_t = t->clock; s_chew = chew;
+    }
+    int cx = (int)floorf(t->urchin_x + 0.5f), cy = (int)(URCHIN_FLOOR_Y + t->urchin_dy);   /* (urchin_dy: on a front piece's base line in its front lane) */
     for (int ly = -16; ly <= (int)UR_BASE; ly++) {
         int y = cy + ly;
         uint32_t w = water_rgb(y < 0 ? 0 : y >= TANK_H ? TANK_H - 1 : y);
+        src_t pal[UR_NONE];
+        for (int k = 0; k < UR_NONE; k++) pal[k] = src_color(mix(w, URCHIN_RGB[k], UR_TINT), c->dim);
+        const uint8_t *row = tn + (ly + 16) * 37;
         for (int lx = -18; lx <= 18; lx++) {
-            int tone = urchin_tone((float)lx + 0.5f, (float)ly + 0.5f, &p);
-            if (tone == UR_NONE || !CTX_IN(c, cx + lx, y)) continue;
-            px_blend(c, cx + lx, y, mix(w, URCHIN_RGB[tone], UR_TINT), 255);
+            int tone = row[lx + 18];
+            if (tone == UR_NONE) continue;
+            px_blend_s(c, cx + lx, y, &pal[tone], 255);
         }
     }
+}
+
+/* ---- the strawberry crab, procedural (0.3.9, SD_ITEM_CRAB) ----
+ * After Strato's strawberry-crab sheets (working-assets/crab/ref7..ref10 and
+ * the pixel crabs he sent 10-23). The prototypes are working-assets/crab/
+ * strawberry_side.py (the profile) and strawberry_proc.py (the roost),
+ * whose coordinates these are: crab units = px, x across its middle, y down
+ * from above it to its feet at CR_FLOOR_SIDE / CR_FLOOR_FRONT. Every cell is
+ * COMPUTED from a few shapes at its centre (no smoothing, so it stays crisp
+ * pixel art): a dome with three tones and single cream seeds, round eyes with
+ * a glint, a tan face, claws (an oval palm, two pale jaws), legs as cubic
+ * curves ROOTED UNDER the shell (it is drawn over their roots) and curled in
+ * at the toe; then one pass darkens every cell on a boundary between two
+ * parts or against the water by its own tone's step (no drawn line: the other
+ * creatures are tone-stepped too; never into the sand). Two views:
+ *  - the PROFILE (walk, rest, dig, eat, claws up), facing cr_facing;
+ *  - the ROOST (CR_ROOST, Strato: "facing forward, straight toward the
+ *    glass, tucked in on itself"): the front view, breathing, its legs
+ *    settling in over its first second, claws open while poked.
+ * Drawn the urchin's way: the tones go into a grid rebuilt only when the
+ * pose changes (a key of mode, gait step, dig beat, breath, poke), and the
+ * grid is blitted every frame with the row's palette mixed with the water.
+ * On the volcano's flank the grid is sampled through a rotation (cr_tilt)
+ * about its footing. */
+#define CR_GX0          (-25)
+#define CR_GW             50
+#define CR_GH             25          /* rows: crab y from floor - 25 to floor (the bottom row stands on the sand) */
+#define CR_TINT        0.90f
+#define CR_FLOOR_SIDE  21.0f
+#define CR_FLOOR_FRONT 22.0f
+#define CR_LX (-0.50f)
+#define CR_LY (-0.70f)
+#define CR_LZ  0.51f
+enum { CRT_NONE, CRT_O, CRT_R, CRT_RD, CRT_RH, CRT_D, CRT_L, CRT_LD, CRT_LK, CRT_P, CRT_Q, CRT_F, CRT_G, CRT_M, CRT_E, CRT_W, CRT_T, CRT_X, CRT_SD, CRT_SDD, CRT_N };   /* SD, SDD: the sand dollar it digs up, gold (the shop's coin) */
+static const uint32_t CR_RGB[CRT_N] = { 0, 0x5e0a0e, 0xe8281a, 0xb8180f, 0xff5a40, 0xf8dccc, 0xf24a30, 0xc0301e, 0xff8a66,
+                                        0xf6c8a0, 0xd09070, 0xe8b48a, 0xc4885e, 0xd0201a, 0x1a0c08, 0xffffff, 0xe89a50, 0x2a0a08, 0xf4c838, 0xb07c16 };
+/* part ids (the outline goes between them): 1 shell, 2 face, 3 the near eye, 4 the far eye,
+ * 10/11 claws, 12 the far claw, 20+ near legs (2 per leg: root half, toe half), 40+ far legs */
+#define CR_LEG_PTS 11
+typedef struct { float p[CR_LEG_PTS][2]; float x0, y0, x1, y1, w0, w1; bool far; } cr_leg_t;
+typedef struct { float ax0, ay0, ax1, ay1, cx, cy, rx, ry, j1[4], j2[4], plx, ply; int bite; } cr_sclaw_t;   /* bite: a tone held in the jaws (CRT_NONE = empty) */
+typedef struct {
+    bool       front;
+    float      dy;                           /* the body's drop (rest, a step's bob) or rise (the roost's breath) */
+    cr_leg_t   leg[8]; int nleg;
+    cr_sclaw_t claw, far_claw;               /* the profile */
+    float      eye[2][3]; bool eye_far[2];   /* the profile: x, y, r */
+    float      fclaw[2][5];                  /* the roost: cx, cy, rx, ry, side */
+    float      open;                         /* the roost's jaws, 0 shut .. 1 open */
+    int        salt;
+    int        find;                         /* a SAND DOLLAR held up in its claw: 0 none, 1 / 2 the glint's two beats */
+    float      fx, fy;                       /* ... where (crab units) */
+} cr_pose_t;
+static inline int cr_tone3(float in, int lit, int base, int dark, float hi, float lo) { return in > hi ? lit : in < lo ? dark : base; }
+static bool cr_seed(float px, float py, float pitch, int salt) {   /* one seed per cell of a jittered grid (the prototypes' seed_at) */
+    float gx = floorf((px + 40) / pitch), gy = floorf((py + 40) / pitch);
+    uint32_t h = chash((int)gx + salt, (int)gy + 3 * salt);
+    float sx = gx * pitch - 40 + 0.6f + (float)(h & 7) / 7.0f * (pitch - 1.6f);
+    float sy = gy * pitch - 40 + 0.6f + (float)((h >> 3) & 7) / 7.0f * (pitch - 1.6f);
+    return floorf(px) == floorf(sx) && floorf(py) == floorf(sy);
+}
+static void cr_leg(cr_leg_t *lg, const float q[4][2], float w0, float w1, bool far) {
+    lg->x0 = lg->y0 = 1e9f; lg->x1 = lg->y1 = -1e9f;
+    for (int i = 0; i < CR_LEG_PTS; i++) {
+        float s = (float)i / (CR_LEG_PTS - 1), a = (1 - s) * (1 - s) * (1 - s), b = 3 * (1 - s) * (1 - s) * s, c = 3 * (1 - s) * s * s, d = s * s * s;
+        float x = a * q[0][0] + b * q[1][0] + c * q[2][0] + d * q[3][0], y = a * q[0][1] + b * q[1][1] + c * q[2][1] + d * q[3][1];
+        lg->p[i][0] = x; lg->p[i][1] = y;
+        if (x < lg->x0) lg->x0 = x;
+        if (x > lg->x1) lg->x1 = x;
+        if (y < lg->y0) lg->y0 = y;
+        if (y > lg->y1) lg->y1 = y;
+    }
+    lg->x0 -= w0; lg->y0 -= w0; lg->x1 += w0; lg->y1 += w0; lg->w0 = w0; lg->w1 = w1; lg->far = far;
+}
+/* the nearest point of a leg: distance, how far along (0 root .. 1 toe), signed side (+ right of the way it runs); false = outside its box */
+static bool cr_leg_near(const cr_leg_t *lg, float px, float py, float *d, float *u, float *side) {
+    if (px < lg->x0 || px > lg->x1 || py < lg->y0 || py > lg->y1) return false;
+    float best = 1e9f;
+    for (int i = 0; i < CR_LEG_PTS - 1; i++) {
+        float x0 = lg->p[i][0], y0 = lg->p[i][1], vx = lg->p[i + 1][0] - x0, vy = lg->p[i + 1][1] - y0, l2 = vx * vx + vy * vy;
+        if (l2 < 1e-9f) l2 = 1e-9f;
+        float t = ((px - x0) * vx + (py - y0) * vy) / l2; t = t < 0 ? 0 : t > 1 ? 1 : t;
+        float ex = px - x0 - t * vx, ey = py - y0 - t * vy, dd = ex * ex + ey * ey;
+        if (dd < best) { best = dd; *u = (i + t) / (CR_LEG_PTS - 1); *side = ((px - x0) * vy - (py - y0) * vx) / sqrtf(l2); }
+    }
+    *d = sqrtf(best);
+    return true;
+}
+static float cr_segd(float px, float py, const float *s, float *t) {
+    float vx = s[2] - s[0], vy = s[3] - s[1], l2 = vx * vx + vy * vy;
+    if (l2 < 1e-9f) l2 = 1e-9f;
+    float tt = ((px - s[0]) * vx + (py - s[1]) * vy) / l2; tt = tt < 0 ? 0 : tt > 1 ? 1 : tt;
+    *t = tt;
+    float ex = px - s[0] - tt * vx, ey = py - s[1] - tt * vy;
+    return sqrtf(ex * ex + ey * ey);
+}
+static void cr_set_sclaw(cr_sclaw_t *c, float ax0, float ay0, float ax1, float ay1, float cx, float cy, float rx, float ry,
+                         float a0, float a1, float a2, float a3, float b0, float b1, float b2, float b3) {
+    c->ax0 = ax0; c->ay0 = ay0; c->ax1 = ax1; c->ay1 = ay1; c->cx = cx; c->cy = cy; c->rx = rx; c->ry = ry;
+    c->j1[0] = a0; c->j1[1] = a1; c->j1[2] = a2; c->j1[3] = a3; c->j2[0] = b0; c->j2[1] = b1; c->j2[2] = b2; c->j2[3] = b3; c->bite = CRT_NONE;
+}
+/* the roost (the front view): settle 1 -> 0 over its first moments, a stretch's claws, a poke, a breath (the shell up a pixel) */
+static void cr_pose_roost(cr_pose_t *p, float settle, float stretch, bool poke, bool breath) {
+    float flex = poke ? -0.8f : 0.6f - 1.6f * settle - 0.6f * stretch;
+    p->front = true;
+    p->dy = (breath && !poke) ? -1.0f : 0.0f;
+    p->open = poke ? 1.0f : 0.7f * stretch;
+    p->nleg = 0;
+    for (int s = -1; s <= 1; s += 2) {
+        float f = flex;
+        const float outer[4][2] = { { s * 11.5f, 8.0f }, { s * (17.8f - f), 9.5f }, { s * (17.8f - f), 18.5f }, { s * (12.0f - f * 0.5f), 21.6f } };
+        const float inner[4][2] = { { s * 9.5f, 11.5f }, { s * (13.8f - f), 13.0f }, { s * (13.4f - f), 18.5f }, { s * (10.6f - f * 0.4f), 21.2f } };
+        cr_leg(&p->leg[p->nleg++], outer, 2.5f, 1.5f, false);
+        cr_leg(&p->leg[p->nleg++], inner, 2.0f, 1.2f, false);
+    }
+    const float fc[2][5] = { { -7.4f, 16.8f, 6.6f, 4.0f, -1 }, { 7.4f, 16.8f, 6.6f, 4.0f, 1 } };
+    memcpy(p->fclaw, fc, sizeof fc);
+}
+static void cr_pose(cr_pose_t *p, const tank_t *t) {
+    memset(p, 0, sizeof *p);
+    const int mode = t->cr_mode;
+    const bool poke = t->cr_poke > 0 || t->cr_scurry || t->cr_find > 0;   /* a tap's claws up; running scared, claws up too; a find held up */
+    if (t->cr_find > 0) p->find = 1 + (((int)(t->clock * 2)) & 1);     /* its glint beats twice a second (the grid rebuilds on the beat) */
+    p->salt = 7 + t->cr_variant;
+    p->front = mode == CR_ROOST;
+    if (p->front) {                                                   /* the roost: strawberry_proc.py pose() */
+        float settle = t->cr_mode_s < 1.2f ? floorf((1 - t->cr_mode_s / 1.2f) * 6) / 6 : 0;   /* it settles in: legs spread, then drawn under */
+        float stretch = 0;
+        if (t->cr_fidget_kind == CR_FID_STRETCH) stretch = floorf(fast_sin((1 - t->cr_fidget / CR_STRETCH_S) * 3.14159f + 4 * TAU) * 6 + 0.5f) / 6;   /* a slow open and close of its claws */
+        if (stretch < 0) stretch = 0;
+        cr_pose_roost(p, settle, stretch, poke, fast_sin(t->clock * 0.9f + 4 * TAU) > 0.35f);
+        if (p->find) { p->fx = 0; p->fy = 14.6f; }                   /* (in at a run with it: held in front) */
+        return;
+    }
+    /* the profile: strawberry_side.py pose() */
+    static const float NEAR[4][9] = { { 5.0f, 12.0f, 10.0f, 13.0f, 13.0f, 17.5f, 13.5f, CR_FLOOR_SIDE, 0.0f },
+                                      { 0.5f, 12.5f, 3.5f, 14.0f, 6.0f, 18.0f, 6.0f, CR_FLOOR_SIDE, 0.5f },
+                                      { -4.0f, 12.5f, -8.0f, 13.5f, -10.0f, 18.0f, -9.5f, CR_FLOOR_SIDE, 0.0f },
+                                      { -8.5f, 12.0f, -15.0f, 12.5f, -18.5f, 17.0f, -18.5f, CR_FLOOR_SIDE, 0.5f } };
+    static const float FAR[4][9] = { { 7.0f, 11.5f, 12.5f, 12.5f, 16.0f, 16.5f, 16.5f, CR_FLOOR_SIDE - 0.5f, 0.5f },
+                                     { -1.5f, 12.0f, 0.0f, 13.5f, 1.5f, 17.5f, 1.0f, CR_FLOOR_SIDE - 0.5f, 0.0f },
+                                     { -6.0f, 12.0f, -11.5f, 13.0f, -14.0f, 17.0f, -14.0f, CR_FLOOR_SIDE - 0.5f, 0.5f },
+                                     { -10.0f, 11.5f, -17.5f, 11.5f, -21.0f, 15.5f, -21.5f, CR_FLOOR_SIDE - 0.5f, 0.0f } };
+    const bool walking = tank_crab_walking(t) && !(mode == CR_CLIMB && t->cr_climb >= 1 && t->cr_climb < 1 + 25.0f / 75.0f);
+    const float gait = floorf(fmodf(t->cr_gait, TAU) / TAU * 16) / 16 * TAU;   /* 16 steps a stride: the grid rebuilds on a step, not a frame */
+    const bool resting = (mode == CR_REST || mode == CR_DIG) && !poke && !walking;
+    float dy = walking ? 0.45f * fast_sin(gait * 2 + 4 * TAU) : resting ? 1.2f : 0.0f;
+    /* the big claw lies between two keys - down at the sand ahead (L 0) and up at its face (L 1) - its jaws parted by
+       `open`. A dig and a meal are one pick of CR_PICK_S: down with the jaws open, a pinch, a bite carried up to its
+       face, and down again (Strato 10-23: the claw "didn't look quite right"); a groom lifts it empty */
+    float L = walking ? 0.35f : 0.3f, open = 0; int bite = CRT_NONE;
+    if ((mode == CR_DIG || mode == CR_EAT) && !poke) {
+        float u = floorf(fmodf(t->cr_mode_s / CR_PICK_S, 1.0f) * 12) / 12;
+        if (u < 0.3f) { L = 1 - u / 0.3f; open = u >= 0.1f ? 1 : 0; }
+        else if (u < 0.42f) { L = 0; open = u < 0.36f ? 0.5f : 0; }
+        else if (u < 0.75f) { L = (u - 0.42f) / 0.33f; bite = mode == CR_EAT ? CRT_X : CRT_G; }
+        else { L = 1; bite = mode == CR_EAT ? CRT_X : CRT_G; }
+        dy += 0.8f * (1 - L);                                         /* it leans in to the pick */
+    } else if (t->cr_fidget_kind == CR_FID_GROOM) {
+        float g = floorf((1 - t->cr_fidget / CR_GROOM_S) * 8) / 8;
+        L = 0.3f + 0.7f * fast_sin(g * 3.14159f + 4 * TAU);
+    } else if (t->cr_fidget_kind == CR_FID_SETTLE) dy += 1.0f;        /* it sits a little lower for a moment */
+    p->dy = dy;
+    const float k = resting ? 0.35f : 0.0f;                           /* at rest the toes draw in under it */
+    p->nleg = 0;
+    for (int pass = 0; pass < 2; pass++) {
+        const float (*L)[9] = pass == 0 ? FAR : NEAR;
+        for (int i = 0; i < 4; i++) {
+            float fx = L[i][6], fy = L[i][7];
+            if (walking) {                                            /* a stance sweeps the foot back 3.2 px, a swing lifts it forward */
+                float f = fmodf(gait / TAU + L[i][8], 1.0f);
+                if (f < 0.6f) fx += 1.6f - 3.2f * (f / 0.6f);
+                else { float g = (f - 0.6f) / 0.4f; fx += -1.6f + 3.2f * g; fy -= 2.2f * fast_sin(g * 3.14159f + 4 * TAU); }
+            }
+            const float q[4][2] = { { L[i][0], L[i][1] + dy },
+                                    { L[i][2] - (L[i][2] - L[i][0]) * k * 0.4f, L[i][3] + dy },
+                                    { L[i][4] + (fx - L[i][6]) * 0.6f - (L[i][4] - L[i][0]) * k, L[i][5] + dy * 0.5f },
+                                    { fx - (fx - L[i][0]) * k, fy } };
+            if (pass == 0) cr_leg(&p->leg[p->nleg++], q, 2.1f, 1.2f, true);
+            else cr_leg(&p->leg[p->nleg++], q, 2.5f, 1.2f, false);
+        }
+    }
+    if (poke)                                                         /* claws up: both raised, jaws open */
+        cr_set_sclaw(&p->claw, 8.5f, 12.0f + dy, 12.0f, 9.0f + dy, 14.5f, 6.5f + dy, 4.6f, 3.2f,
+                     17.5f, 4.5f + dy, 20.5f, 2.5f + dy, 18.5f, 7.2f + dy, 21.5f, 6.4f + dy);
+    else {
+        static const float SAND[16]  = { 8.5f, 13.0f, 13.5f, 16.5f,  16.8f, 18.0f, 4.4f, 2.6f,  20.6f, 17.0f, 23.6f, 19.4f,  20.2f, 19.6f, 22.6f, 20.6f };
+        static const float MOUTH[16] = { 8.5f, 13.0f, 11.5f, 13.2f,  13.8f, 11.6f, 3.6f, 2.7f,  13.2f,  9.6f, 11.6f,  7.8f,  15.4f,  9.4f, 14.6f,  7.0f };
+        float k8[16];
+        for (int i = 0; i < 16; i++) k8[i] = SAND[i] + (MOUTH[i] - SAND[i]) * L;
+        k8[1] += dy; k8[3] += dy; k8[5] += dy; k8[9] += dy * L; k8[11] += dy * L; k8[13] += dy * L; k8[15] += dy * L;   /* the body's lean; at the sand the jaws stay on it */
+        k8[10] += -1.0f * L * open; k8[11] += -1.6f * (1 - L) * open;  /* the jaws part: up and down at the sand, apart at the face */
+        k8[14] += 1.0f * L * open;  k8[15] += 1.2f * (1 - L) * open;
+        cr_set_sclaw(&p->claw, k8[0], k8[1], k8[2], k8[3], k8[4], k8[5], k8[6], k8[7], k8[8], k8[9], k8[10], k8[11], k8[12], k8[13], k8[14], k8[15]);
+        if (bite != CRT_NONE) { p->claw.bite = bite; p->claw.plx = (k8[10] + k8[14]) * 0.5f; p->claw.ply = (k8[11] + k8[15]) * 0.5f; }
+    }
+    if (poke)
+        cr_set_sclaw(&p->far_claw, 9.5f, 11.0f + dy, 12.0f, 8.0f + dy, 13.5f, 5.2f + dy, 3.2f, 2.4f,
+                     15.8f, 3.8f + dy, 18.0f, 2.4f + dy, 16.4f, 6.0f + dy, 18.6f, 5.4f + dy);
+    else
+        cr_set_sclaw(&p->far_claw, 9.5f, 12.0f + dy, 12.5f, 12.6f + dy, 14.6f, 13.2f + dy, 3.0f, 2.2f,
+                     17.2f, 12.4f + dy, 19.4f, 12.8f + dy, 17.2f, 14.2f + dy, 19.0f, 14.2f + dy);
+    if (p->find) { p->fx = 20.2f; p->fy = 1.2f + dy; }               /* held up in the raised claw's jaws (the poke pose), over its head */
+    p->eye[0][0] = 6.5f; p->eye[0][1] = 6.5f + dy; p->eye[0][2] = 2.7f; p->eye_far[0] = false;
+    p->eye[1][0] = 10.0f; p->eye[1][1] = 4.4f + dy; p->eye[1][2] = 1.9f; p->eye_far[1] = true;
+}
+/* the profile's claw (strawberry_side.py claw_px): an arm, an oval palm, two jaws, maybe a pellet */
+static int cr_sclaw_tone(float px, float py, const cr_sclaw_t *c, bool far) {
+    int hit = CRT_NONE;
+    float t;
+    const float arm[4] = { c->ax0, c->ay0, c->ax1, c->ay1 };
+    float d = cr_segd(px, py, arm, &t);
+    if (d <= 1.6f - 0.2f * t) hit = d < 0.9f ? CRT_L : CRT_LD;
+    float ex = (px - c->cx) / c->rx, ey = (py - c->cy) / c->ry, v = ex * ex + ey * ey;
+    if (v <= 1.0f) {
+        hit = cr_tone3(-ex * 0.5f - ey * 0.85f, CRT_LK, CRT_L, CRT_LD, 0.45f, -0.45f);
+        if (v < 0.6f && cr_seed(px, py, 3.6f, 13)) hit = CRT_D;
+    }
+    for (int j = 0; j < 2; j++) {
+        float dj = cr_segd(px, py, j == 0 ? c->j1 : c->j2, &t);
+        if (dj <= 1.25f - 0.6f * t && (hit == CRT_NONE || t > 0.15f)) hit = (j == 0 || t > 0.5f) ? CRT_P : CRT_Q;
+    }
+    if (c->bite != CRT_NONE && (px - c->plx) * (px - c->plx) + (py - c->ply) * (py - c->ply) <= 1.69f) hit = c->bite;
+    if (hit != CRT_NONE && far) hit = hit == CRT_LK ? CRT_L : hit == CRT_L ? CRT_LD : hit == CRT_LD ? CRT_RD : hit == CRT_P ? CRT_Q : hit == CRT_D ? CRT_LD : hit;
+    return hit;
+}
+/* the tone and the part at crab-unit (px, py); painter's order, the last hit wins */
+static int cr_cell(float px, float py, const cr_pose_t *p, int *part) {
+    int tone = CRT_NONE; *part = 0;
+    float d, u, side;
+    if (p->front) {                                                   /* strawberry_proc.py crab_px */
+        if (py >= 10.5f && py <= 15.5f && fabsf(px) <= 11.5f - (py - 11.5f) * 1.6f) {   /* the face under the lip, the fangs */
+            tone = (fabsf(px) > 9.5f - (py - 11.5f) * 1.6f || py > 13.5f) ? CRT_G : CRT_F;
+            if (fabsf(px) >= 2.0f && fabsf(px) <= 3.0f && py < 13.0f) tone = CRT_M;
+            *part = 2;
+        }
+        for (int i = 0; i < p->nleg; i++) {
+            const cr_leg_t *lg = &p->leg[i];
+            if (!cr_leg_near(lg, px, py, &d, &u, &side)) continue;
+            float w = lg->w0 + (lg->w1 - lg->w0) * u;
+            if (d > w) continue;
+            float out = side * (lg->p[0][0] < 0 ? 1.0f : -1.0f);
+            tone = out < -0.15f * w ? CRT_LK : out > 0.75f * w ? CRT_LD : CRT_L;
+            if (u > 0.9f) tone = CRT_P;
+            *part = 20 + i * 2 + (u < 0.5f ? 0 : 1);
+        }
+        float y = py - p->dy;
+        if (y > -0.3f && y < 11.6f) {                                 /* the shell: a dome 14.3 wide at the lip */
+            float tt = (11.6f - y) / 11.9f, hw = 14.3f * powf(fmaxf(0.0f, 1 - tt * tt), 0.45f);
+            if (fabsf(px) <= hw) {
+                float nx = px / 14.3f, ny = tt, n2 = nx * nx + ny * ny, nz = sqrtf(n2 < 1 ? 1 - n2 : 0);
+                tone = cr_tone3(nx * CR_LX - ny * CR_LY + nz * CR_LZ, CRT_RH, CRT_R, CRT_RD, 0.80f, 0.08f);
+                bool clear = true;
+                for (int k = -1; k <= 1; k += 2) if ((px - k * 5.5f) * (px - k * 5.5f) + (y - 8.5f) * (y - 8.5f) <= 3.9f * 3.9f) clear = false;
+                if (clear && fabsf(px) < hw - 1.2f && y > 0.9f && y < 10.6f && cr_seed(px, y, 2.9f, p->salt)) tone = CRT_D;
+                *part = 1;
+                for (int k = -1; k <= 1; k += 2) {                    /* the eyes on the lip */
+                    float ex = k * 5.5f, ey = 8.5f, ddx = px - ex, ddy = y - ey, e = sqrtf(ddx * ddx + ddy * ddy);
+                    if (e <= 2.95f) {
+                        bool g = ddx >= -2.0f && ddx < 0 && ddy >= -2.0f && ddy < 0 && e < 2.3f;
+                        tone = g ? CRT_W : (ddy > 1.6f && fabsf(ddx) > 0.6f) ? CRT_T : CRT_E; *part = 3;
+                    } else if (ddy > 2.95f && ddy <= 3.9f && fabsf(ddx) <= 1.5f) { tone = CRT_T; *part = 3; }
+                }
+            }
+        }
+        for (int j = 0; j < 2; j++) {                                 /* the claws folded in front */
+            const float *c = p->fclaw[j];
+            float ex = (px - c[0]) / c[2], ey = (py - c[1]) / c[3], v = ex * ex + ey * ey;
+            if (v > 1.0f) continue;
+            tone = cr_tone3(-ex * 0.6f - ey * 0.8f, CRT_LK, CRT_L, CRT_LD, 0.45f, -0.45f);
+            if (v < 0.6f && cr_seed(px, py, 4.4f, 11 + j)) tone = CRT_D;
+            float inner = -c[4] * (px - c[0]);
+            if (inner > c[2] * 0.45f && py > c[1] - 1.6f - 1.2f * p->open) {   /* the pincers: pale, the jaws parting as it opens */
+                tone = py > c[1] - 0.6f ? CRT_P : CRT_Q;
+                float gap = 1.0f + 2.6f * p->open;
+                if (py >= c[1] + 0.9f && py < c[1] + 0.9f + gap) tone = CRT_O;
+            }
+            *part = 10 + j;
+        }
+    if (p->find) {                                                    /* the SAND DOLLAR: a gold disc, its five-petal mark, a glint that beats */
+        float ddx = px - p->fx, ddy = py - p->fy, e2 = ddx * ddx + ddy * ddy;
+        if (e2 <= 3.4f * 3.4f) {
+            tone = CRT_SD; *part = 13;
+            if (e2 < 0.5f || ((fabsf(ddx) < 0.55f || fabsf(ddy) < 0.55f) && e2 > 1.6f && e2 < 6.8f)) tone = CRT_SDD;   /* the mark: a dot, four spokes */
+            if (p->find == 2 && ddx > 0.9f && ddx < 2.1f && ddy < -0.9f && ddy > -2.1f) tone = CRT_W;                  /* the glint's beat */
+        }
+    }
+        return tone;
+    }
+    /* the profile (strawberry_side.py crab_px): far legs, far claw, near legs, face, shell, eyes, the big claw */
+    for (int i = 0; i < p->nleg; i++) {
+        const cr_leg_t *lg = &p->leg[i];
+        if (!lg->far || !cr_leg_near(lg, px, py, &d, &u, &side)) continue;
+        if (d <= 2.1f - 0.9f * u) { tone = u > 0.88f ? CRT_Q : side > 0.2f ? CRT_LD : CRT_L; *part = 40 + i * 2 + (u < 0.5f ? 0 : 1); }
+    }
+    int ct = cr_sclaw_tone(px, py, &p->far_claw, true);
+    if (ct != CRT_NONE) { tone = ct; *part = 12; }
+    for (int i = 0; i < p->nleg; i++) {
+        const cr_leg_t *lg = &p->leg[i];
+        if (lg->far || !cr_leg_near(lg, px, py, &d, &u, &side)) continue;
+        float w = 2.5f - 1.3f * u;
+        if (d > w) continue;
+        bool back = lg->p[0][0] > lg->p[CR_LEG_PTS - 1][0];           /* a leg reaching back: its outer side is the other one */
+        float sd = back ? -side : side;
+        tone = sd < -0.25f * w ? CRT_LK : sd > 0.7f * w ? CRT_LD : CRT_L;
+        if (u > 0.88f) tone = CRT_P;
+        *part = 20 + i * 2 + (u < 0.5f ? 0 : 1);
+    }
+    {   float fx = (px - 8.5f) / 5.0f, fy = (py - (12.3f + p->dy)) / 2.8f;   /* the tan face under the front */
+        if (fx * fx + fy * fy <= 1.0f) { tone = (fy > 0.7f || fx < -0.7f) ? CRT_G : CRT_F; *part = 2; } }
+    {   float y = py - p->dy;                                         /* the shell: a long dome, higher at the front */
+        const float x0 = -1.0f, rx = px > x0 ? 12.5f : 14.0f, uu = (px - x0) / rx;
+        if (fabsf(uu) < 1.0f) {
+            float top = 12.5f - 13.0f * sqrtf(1 - uu * uu) * (1.0f + 0.12f * uu), bot = 12.5f - 2.6f * uu * uu * uu * uu;
+            if (top < bot && y >= top && y <= bot) {
+                float ny = (y - (top + bot) * 0.5f) / fmaxf(1.0f, (bot - top) * 0.5f);
+                ny = ny < -1 ? -1 : ny > 1 ? 1 : ny;
+                float n2 = 0.6f * uu * uu + 0.6f * ny * ny, nz = sqrtf(n2 < 1 ? 1 - n2 : 0);
+                tone = cr_tone3(uu * CR_LX + ny * CR_LY + nz * CR_LZ, CRT_RH, CRT_R, CRT_RD, 0.78f, 0.12f);
+                bool clear = true;
+                for (int k = 0; k < 2; k++) { float ddx = px - p->eye[k][0], ddy = py - p->eye[k][1], r = p->eye[k][2] + 1.4f; if (ddx * ddx + ddy * ddy < r * r) clear = false; }
+                if (clear && y > top + 1.0f && y < bot - 1.0f && cr_seed(px, y, 2.9f, p->salt)) tone = CRT_D;
+                *part = 1;
+            }
+        } }
+    for (int k = 0; k < 2; k++) {                                     /* the big eye on the flank, the far one over the front edge */
+        float ddx = px - p->eye[k][0], ddy = py - p->eye[k][1], R = p->eye[k][2], e = sqrtf(ddx * ddx + ddy * ddy);
+        if (e > R) continue;
+        bool far = p->eye_far[k];
+        bool g = !far ? (ddx >= -2.0f && ddx < 0 && ddy >= -2.0f && ddy < 0 && e < R - 0.3f) : (ddx >= -1.0f && ddx < 0 && ddy >= -1.0f && ddy < 0);
+        tone = g ? CRT_W : CRT_E;
+        if (!far && ddy > 1.2f && fabsf(ddx) > 0.6f) tone = CRT_T;
+        *part = far ? 4 : 3;
+    }
+    ct = cr_sclaw_tone(px, py, &p->claw, false);
+    if (ct != CRT_NONE) { tone = ct; *part = 10; }
+    if (p->find) {                                                    /* the SAND DOLLAR: a gold disc, its five-petal mark, a glint that beats */
+        float ddx = px - p->fx, ddy = py - p->fy, e2 = ddx * ddx + ddy * ddy;
+        if (e2 <= 3.4f * 3.4f) {
+            tone = CRT_SD; *part = 13;
+            if (e2 < 0.5f || ((fabsf(ddx) < 0.55f || fabsf(ddy) < 0.55f) && e2 > 1.6f && e2 < 6.8f)) tone = CRT_SDD;   /* the mark: a dot, four spokes */
+            if (p->find == 2 && ddx > 0.9f && ddx < 2.1f && ddy < -0.9f && ddy > -2.1f) tone = CRT_W;                  /* the glint's beat */
+        }
+    }
+    return tone;
+}
+/* the grid: every cell's tone, then its EDGES - a cell that borders the water
+   or another part takes its own tone's darker step (the shell's dark red, the
+   limbs' dark, the pincers' deeper pale, the face's tan), never a drawn line:
+   the shrimp, the urchin, the snail and the seahorse separate their parts by
+   tone steps alone, and a maroon line round the crab made it the one creature
+   in another illustration style (Strato 2026-10-24: "parity"; the prototypes
+   in working-assets/crab still draw the line). The eyes keep their rims. */
+static int cr_dark_of(int tone) {
+    switch (tone) {
+    case CRT_R: case CRT_RH: case CRT_D: case CRT_RD: return CRT_RD;
+    case CRT_L: case CRT_LK: case CRT_LD: return CRT_LD;
+    case CRT_P: case CRT_Q: return CRT_Q;
+    case CRT_F: case CRT_G: case CRT_M: return CRT_G;
+    case CRT_SD: return CRT_SDD;
+    default: return tone;
+    }
+}
+static void cr_build(uint8_t *tn, uint8_t *pt, const cr_pose_t *p) {
+    const float floor_u = p->front ? CR_FLOOR_FRONT : CR_FLOOR_SIDE;
+    for (int gy = 0; gy < CR_GH; gy++)
+        for (int gx = 0; gx < CR_GW; gx++) {
+            int part, tone = cr_cell(CR_GX0 + gx + 0.5f, floor_u - CR_GH + gy + 0.5f, p, &part);
+            tn[gy * CR_GW + gx] = (uint8_t)tone; pt[gy * CR_GW + gx] = (uint8_t)(tone == CRT_NONE ? 0 : part);
+        }
+    for (int gy = 0; gy < CR_GH; gy++)                                /* the edge pass reads the parts, never the tones it just wrote */
+        for (int gx = 0; gx < CR_GW; gx++) {
+            const int t0 = pt[gy * CR_GW + gx];
+            if (!t0 || t0 == 3 || t0 == 4) continue;
+            bool edge = false;
+            const int N[4][2] = { { -1, 0 }, { 1, 0 }, { 0, -1 }, { 0, 1 } };
+            for (int k = 0; k < 4 && !edge; k++) {
+                int nx = gx + N[k][0], ny = gy + N[k][1];
+                if (ny >= CR_GH) continue;                            /* the sand under it */
+                int n = (nx < 0 || nx >= CR_GW || ny < 0) ? 0 : pt[ny * CR_GW + nx];
+                if (n == t0 || n == 3) continue;
+                if (p->front && t0 == 2 && n == 1) continue;          /* the lip's step is on the shell's side */
+                edge = true;
+            }
+            if (edge) tn[gy * CR_GW + gx] = (uint8_t)cr_dark_of(tn[gy * CR_GW + gx]);
+        }
+}
+static uint32_t cr_hash(const cr_pose_t *p) {                        /* FNV-1a over the pose (memset to 0 first: no stray padding) */
+    const uint8_t *b = (const uint8_t *)p; uint32_t h = 2166136261u;
+    for (size_t i = 0; i < sizeof *p; i++) { h ^= b[i]; h *= 16777619u; }
+    return h ? h : 1;
+}
+static void draw_crab(ctx_t *c, const tank_t *t) {
+    if (!(t->sd_unlocks & SD_ITEM_CRAB) || t->cr_x < 0) return;
+    static uint32_t s_key = 0;
+    uint8_t *tn = ds()->cr_tones;
+    const int mode = t->cr_mode;
+    cr_pose_t p; cr_pose(&p, t);                                      /* cheap: no cell is computed here */
+    const uint32_t key = cr_hash(&p);                                 /* the grid is rebuilt only when the picture changes (cr_pose quantizes) */
+    if (key != s_key) { cr_build(tn, ds()->cr_parts, &p); s_key = key; }
+    const int f = (t->cr_facing < 0 && mode != CR_ROOST) ? -1 : 1;
+    const int feet = (int)floorf(CR_FLOOR_Y - t->cr_y);              /* the bottom row's y */
+    /* backed into its shelter's dark (cr_back, tank.c: a motion in and out, never a switch): with it the crab draws
+       SMALLER, a few px HIGHER (the cave's floor receding) and DARKER - everything but its eyes' glints and a held
+       sand dollar sinks toward black (half dark at the back: a crab in shadow, its glints bright) */
+    const float back = t->cr_back;
+    float dark = 0.55f * back;
+    if (t->cr_tilt == 0 && back <= 0.001f) {
+        const int cx = (int)floorf(t->cr_x + 0.5f);
+        for (int gy = 0; gy < CR_GH; gy++) {
+            const int y = feet - (CR_GH - 1) + gy;
+            if (y < 0 || y >= TANK_H) continue;
+            const uint8_t *row = tn + gy * CR_GW;
+            bool any = false;
+            for (int gx = 0; gx < CR_GW; gx++) if (row[gx]) { any = true; break; }
+            if (!any) continue;
+            const uint32_t w = water_rgb(y);
+            src_t pal[CRT_N];
+            for (int k = 1; k < CRT_N; k++) {
+                uint32_t rgb = mix(w, CR_RGB[k], CR_TINT);
+                if (dark > 0 && k != CRT_W && k != CRT_E && k != CRT_SD && k != CRT_SDD) rgb = mix(rgb, 0x050304, dark);
+                pal[k] = src_color(rgb, c->dim);
+            }
+            for (int gx = 0; gx < CR_GW; gx++) {
+                int tone = row[gx];
+                if (tone == CRT_NONE) continue;
+                int x = f > 0 ? cx + CR_GX0 + gx : cx - 1 - (CR_GX0 + gx);
+                px_blend_s(c, x, y, &pal[tone], 255);
+            }
+        }
+        return;
+    }
+    /* on the flank: (cr_x, its feet) is its FOOTING on the rock - the grid's (0, the bottom) - and the grid is
+       sampled through a rotation about it by cr_tilt (tank.c: its underside against the slope). Backed into the
+       dark the same sampler draws it through a SCALE about its feet (down to 0.82) with the feet lifted (up to 4 px) */
+    const float sc = 1.0f - 0.18f * back, lift = 4.0f * back;
+    const float ox = t->cr_x, oy = (float)(feet + 1) - lift, ca = cosf(t->cr_tilt), sa = sinf(t->cr_tilt);
+    const int R = 34;
+    for (int y = (int)oy - R; y <= (int)oy + R; y++) {
+        if (y < 0 || y >= TANK_H) continue;
+        src_t pal[CRT_N]; bool have = false;
+        for (int x = (int)ox - R; x <= (int)ox + R; x++) {
+            float dx = x + 0.5f - ox, dy = y + 0.5f - oy;
+            float lx = (ca * dx + sa * dy) * f / sc, ly = (-sa * dx + ca * dy) / sc;   /* back into the grid: x from its middle, y up from its feet */
+            int gx = (int)floorf(lx) - CR_GX0, gy = (int)floorf(ly) + CR_GH;
+            if (gx < 0 || gx >= CR_GW || gy < 0 || gy >= CR_GH) continue;
+            int tone = tn[gy * CR_GW + gx];
+            if (tone == CRT_NONE) continue;
+            if (!have) {
+                uint32_t w = water_rgb(y);
+                for (int k = 1; k < CRT_N; k++) {
+                    uint32_t rgb = mix(w, CR_RGB[k], CR_TINT);
+                    if (dark > 0 && k != CRT_W && k != CRT_E && k != CRT_SD && k != CRT_SDD) rgb = mix(rgb, 0x050304, dark);
+                    pal[k] = src_color(rgb, c->dim);
+                }
+                have = true;
+            }
+            px_blend_s(c, x, y, &pal[tone], 255);
+        }
+    }
+}
+
+/* does the crab, as draw_crab painted it this frame (ds()->cr_tones: the grid of its last build), cover (x, y)?
+   The painter's two mappings run backwards: the 1:1 blit, or the sampler's rotation / scale about its feet. */
+static bool crab_covers(const tank_t *t, int x, int y) {
+    if (!(t->sd_unlocks & SD_ITEM_CRAB) || t->cr_x < 0) return false;
+    const int feet = (int)floorf(CR_FLOOR_Y - t->cr_y);
+    if (x < (int)t->cr_x - 36 || x > (int)t->cr_x + 36 || y < feet - 36 || y > feet + 36) return false;
+    const int f = (t->cr_facing < 0 && t->cr_mode != CR_ROOST) ? -1 : 1;
+    const float back = t->cr_back;
+    int gx, gy;
+    if (t->cr_tilt == 0 && back <= 0.001f) {
+        const int cx = (int)floorf(t->cr_x + 0.5f);
+        gx = f > 0 ? x - cx - CR_GX0 : cx - 1 - x - CR_GX0;
+        gy = y - feet + CR_GH - 1;
+    } else {
+        const float sc = 1.0f - 0.18f * back, lift = 4.0f * back;
+        const float ox = t->cr_x, oy = (float)(feet + 1) - lift, ca = cosf(t->cr_tilt), sa = sinf(t->cr_tilt);
+        float dx = x + 0.5f - ox, dy = y + 0.5f - oy;
+        float lx = (ca * dx + sa * dy) * f / sc, ly = (-sa * dx + ca * dy) / sc;
+        gx = (int)floorf(lx) - CR_GX0; gy = (int)floorf(ly) + CR_GH;
+    }
+    if (gx < 0 || gx >= CR_GW || gy < 0 || gy >= CR_GH) return false;
+    return ds()->cr_tones[gy * CR_GW + gx] != CRT_NONE;
 }
 
 /* ---- the seahorse (0.3.6; the prototype is working-assets/seahorse/
@@ -2194,6 +3365,7 @@ static bool veg_ribbon_at(const tank_t *t, int b, int i, int y, float clock, flo
     bool sword = tank_veg_kind(t, b) == VEG_KIND_SWORD;
     int seed = VEG_SEED[b];
     float sway = fast_sin(clock * (sword ? 0.6f : 0.9f) + (i + seed) * 1.7f) * (sword ? 2.5f : 4.0f);
+    if (g_veg_step == 2) { int yb = (int)(TANK_BOT - 16 + VEG_SEG_RY); y = yb - ((yb - y) & ~1); }   /* row pairs: the pair's lower row, as draw_veg paints it */
     float sp = (TANK_BOT - 16 - y) / VEG_SEG_DY;
     if (sp < -0.7f || sp > segs - 1 + 0.7f) return false;
     if (sp < 0) sp = 0;
@@ -2351,13 +3523,13 @@ static void draw_seahorse(ctx_t *c, const tank_t *t) {
  * presets: the coral / the tubes / the brain each), tinted per row. */
 #define CL_CELL 2
 #define CL_W    (CL_CW * CL_CELL)
-#define CL_FY   (TANK_BOT - 14 + DECOR_SINK)
+#define CL_FY   (TANK_BOT - 14 + DECOR_SINK + g_dz_cl)   /* on its depth's line (0.3.9) */
 #define CL_Q    64                                           /* sprite rebuilds over the size phase */
 enum { CLE_ROCK, CLE_WEED, CLE_CORAL, CLE_TUBE, CLE_BRAIN, CLE_N };
 enum { CLV_BODY, CLV_LIT, CLV_RIM, CLV_SHADE, CLV_DEEP, CLV_N };
 #define CL_TONE(e, v) (1 + (e) * CLV_N + (v))
 static int      g_cl_q = -1, g_cl_cells;
-static int      g_cl_scheme = -1; static float g_cl_dim = -1;
+static int      g_cl_scheme = -1; static float g_cl_dim = -1; static int g_cl_dzk = 99;
 /* geometry in unscaled cells: x from the left, y UP from the base row; the
  * size scales it about (36, 0) */
 #define CL_CX 36.0f
@@ -2467,7 +3639,8 @@ static void cl_build(float g) {
 }
 int render_cluster_cells(float growth) { cl_build(growth); g_cl_q = -1; return g_cl_cells; }
 static void cl_tint_fill(int scheme, float dim) {
-    if (g_cl_scheme == scheme && g_cl_dim == dim) return;
+    if (g_cl_scheme == scheme && g_cl_dim == dim && g_cl_dzk == g_dz_cl) return;
+    float haze = decor_haze(0.90f, g_dz_cl);
     const cluster_scheme_t *sc = &CLUSTER_SCHEMES[scheme];
     uint32_t base[CLE_N] = { 0x9a9284, 0x8fc63a, sc->coral, sc->tube, sc->brain };
     uint32_t tone[CL_TONES]; tone[0] = 0;
@@ -2483,9 +3656,9 @@ static void cl_tint_fill(int scheme, float dim) {
     for (int r = 0; r < CL_H; r++) {
         int y = CL_FY - CL_H + r;
         uint32_t w = water_rgb(y < 0 ? 0 : y >= TANK_H ? TANK_H - 1 : y);
-        for (int k = 1; k < CL_TONES; k++) ds()->cl_row[k][r] = rgb565(mix(w, tone[k], 0.90f), dim);
+        for (int k = 1; k < CL_TONES; k++) ds()->cl_row[k][r] = rgb565(mix(w, tone[k], haze), dim);
     }
-    g_cl_scheme = scheme; g_cl_dim = dim;
+    g_cl_scheme = scheme; g_cl_dim = dim; g_cl_dzk = g_dz_cl;
 }
 static void draw_cluster(ctx_t *c, int cx, int scheme, float growth, bool final) {
     if (growth > 1) growth = 1;
@@ -2504,7 +3677,7 @@ static void draw_cluster(ctx_t *c, int cx, int scheme, float growth, bool final)
                     int x = x0 + i * CL_CELL + dx;
                     if (!CTX_IN(c, x, y)) continue;
                     uint16_t *p = &CTX_PX(c, x, y);
-                    *p = v;
+                    *p = FB_SWAP16(v); TOUCH_PX(c, x, y);
                     rec_px(x, y);
                     if (final) {
                         PK_LIGHT_PX(p, x, y);
@@ -2515,7 +3688,7 @@ static void draw_cluster(ctx_t *c, int cx, int scheme, float growth, bool final)
                 }
             }
         }
-    draw_floor_mound(c, cx, CLUSTER_HALF_W - 2, 6, final);            /* anchored: the rock sits in a low hump of the floor's stones */
+    draw_floor_mound(c, cx, CLUSTER_HALF_W - 2, 6, g_dz_cl, final);            /* anchored: the rock sits in a low hump of the floor's stones */
 }
 /* the bloom (growth 1 -> CLUSTER_FULL): more and more tentacles, dealt one
  * at a time round the hosts - the four tube mouths, the coral's seven tips,
@@ -2580,9 +3753,9 @@ static void draw_cluster_crown(ctx_t *c, int cx, int scheme, float growth, float
  * (BEHIND: right over the scene; IN FRONT: after the grass), unmasked. The
  * castle's masks are static and centre-relative (castle_put), so it covers
  * even while dragged. */
-#define PIECES_MAX 4
+#define PIECES_MAX 5
 typedef struct {
-    int  item;                            /* 2 the castle, 3 the coral, 4 the cluster, 8 the pumpkin */
+    int  item;                            /* 2 the castle, 3 the coral, 4 the cluster, 8 the pumpkin, 9 the volcano */
     int  cx, z;                           /* its centre on the floor, its depth */
     bool placing;                         /* dragged on its page this frame */
     bool baked;                           /* in the scene this frame (its mask is this frame's) */
@@ -2596,7 +3769,7 @@ static scene_sig_t g_sig; static bool g_sig_ok;
 static bool g_pk_hidden;                  /* director `pumpkin off`: the frame-rate A/B */
 void render_set_pumpkin_hidden(bool hidden) { g_pk_hidden = hidden; }
 bool render_pumpkin_hidden(void) { return g_pk_hidden; }
-static float pc_half_w(int item) { return item == 2 ? CASTLE_HALF_W : item == 3 ? CORAL_HALF_W : item == 4 ? CLUSTER_HALF_W : PUMPKIN_HALF_W; }
+static float pc_half_w(int item) { return item == 2 ? CASTLE_HALF_W : item == 3 ? CORAL_HALF_W : item == 4 ? CLUSTER_HALF_W : item == 9 ? VOLCANO_HALF_W : PUMPKIN_HALF_W; }
 static int   pc_index(int item) { for (int k = 0; k < g_npc; k++) if (g_pc[k].item == item) return k; return -1; }
 /* the solid pieces above the lantern cast on the sand (pk_casts; the castle has its own rules) */
 static void pk_casts_pieces(const tank_t *t) {
@@ -2611,6 +3784,7 @@ static void pk_casts_pieces(const tank_t *t) {
 static void pieces_build(const tank_t *t, bool cached, bool front) {
     int items[DECOR_SLOTS], n = tank_decor_order(t, items);
     g_npc = 0; g_pk_k = -1; g_castle_cx = -1;
+    g_dz_castle = g_dz_coral = g_dz_cl = g_dz_pk = g_dz_vo = 0;
     for (int i = 0; i < n && g_npc < PIECES_MAX; i++) {
         int item = items[i];
         if (item == 0 || (item == 8 && g_pk_hidden)) continue;
@@ -2618,11 +3792,17 @@ static void pieces_build(const tank_t *t, bool cached, bool front) {
         p->item = item; p->cx = (int)tank_decor_x(t, item); p->z = tank_decor_z(t, item);
         p->placing = setup_is_place() && setup_item() == item;
         p->baked = cached && !p->placing && (p->z != DECOR_Z_FRONT || front);
-        switch (item) {
-            case 2:  p->x0 = p->cx - CASTLE_MASK_W / 2; p->y0 = CASTLE_FY - CASTLE_ROWS; p->w = CASTLE_MASK_W; p->rows = CASTLE_ROWS + 12; g_castle_cx = p->cx; break;
-            case 3:  p->x0 = p->cx - CORAL_W / 2; p->y0 = CORAL_FY - CORAL_H; p->w = CORAL_W; p->rows = CORAL_H + 4; break;
-            case 4:  p->x0 = p->cx - CL_W / 2; p->y0 = CL_FY - CL_H; p->w = CL_W; p->rows = CL_H + 4; break;
-            default: p->x0 = p->cx - PK_W / 2; p->y0 = PK_FY - PK_H; p->w = PK_W; p->rows = PK_H + 4; break;
+        switch (item) {                       /* its floor line by its depth first (0.3.9), then its box */
+            case 2:  g_dz_castle = decor_dz(p->z, TANK_BOT - 16);
+                     p->x0 = p->cx - CASTLE_MASK_W / 2; p->y0 = CASTLE_FY - CASTLE_ROWS; p->w = CASTLE_MASK_W; p->rows = CASTLE_ROWS + 12; g_castle_cx = p->cx; break;
+            case 3:  g_dz_coral = decor_dz(p->z, TANK_BOT - 14 + DECOR_SINK);
+                     p->x0 = p->cx - CORAL_W / 2; p->y0 = CORAL_FY - CORAL_H; p->w = CORAL_W; p->rows = CORAL_H + 4; break;
+            case 4:  g_dz_cl = decor_dz(p->z, TANK_BOT - 14 + DECOR_SINK);
+                     p->x0 = p->cx - CL_W / 2; p->y0 = CL_FY - CL_H; p->w = CL_W; p->rows = CL_H + 4; break;
+            case 9:  g_dz_vo = decor_dz(p->z, TANK_BOT - 16);
+                     p->x0 = p->cx - VO_W / 2; p->y0 = VO_FY - VO_H; p->w = VO_W; p->rows = VO_H + 4; break;
+            default: g_dz_pk = decor_dz(p->z, TANK_BOT - 14 + DECOR_SINK);
+                     p->x0 = p->cx - PK_W / 2; p->y0 = PK_FY - PK_H; p->w = PK_W; p->rows = PK_H + 4; break;
         }
         g_npc++;
     }
@@ -2678,6 +3858,30 @@ static bool pc_covered_above(int k, int x, int y) {
     for (int j = k + 1; j < g_npc; j++) if ((g_pc[j].baked || g_pc[j].item == 2) && pc_covers(j, x, y)) return true;
     return false;
 }
+bool render_decor_covers(int item, int x, int y) { int k = pc_index(item); return k >= 0 && pc_covers(k, x, y); }   /* (the tests) */
+/* the CONTACT SHADOW (0.3.9, Strato: "we're losing depth ... everything flat
+ * against the glass"): right after a piece is baked, its silhouette shifted
+ * down and to the right (the light comes from the upper left) darkens what
+ * stands behind it in the scene - the water, the sand, a piece behind it -
+ * a hard step close in and a softer one further out, never on the piece
+ * itself. The scene at that moment holds only what is behind it, so the
+ * order does the rest. Bake only: nothing per frame. */
+#define PC_SHADOW_NEAR 3
+#define PC_SHADOW_FAR  6
+static void pc_contact_shadow(ctx_t *c, int k) {
+    const piece_t *p = &g_pc[k];
+    int xa = p->x0, xb = p->x0 + p->w - 1 + PC_SHADOW_FAR, ya = p->y0, yb = p->y0 + p->rows - 1 + PC_SHADOW_FAR;
+    if (xa < 0) xa = 0;
+    if (xb > TANK_W - 1) xb = TANK_W - 1;
+    if (ya < 0) ya = 0;
+    if (yb > TANK_H - 1) yb = TANK_H - 1;
+    for (int y = ya; y <= yb; y++)
+        for (int x = xa; x <= xb; x++) {
+            if (pc_covers(k, x, y)) continue;
+            int a = pc_covers(k, x - PC_SHADOW_NEAR, y - PC_SHADOW_NEAR) ? 72 : pc_covers(k, x - PC_SHADOW_FAR, y - PC_SHADOW_FAR) ? 34 : 0;
+            if (a) px_darken(&CTX_PX(c, x, y), a);
+        }
+}
 /* the pieces a bed's spans leave alone (veg_span) */
 static uint32_t veg_skip_for(const tank_t *t, int b) {
     int bz = bed_z(t, b); uint32_t m = 0;
@@ -2715,13 +3919,15 @@ static void pc_draw(ctx_t *c, const tank_t *t, int k, bool final, bool record) {
     }
     g_pk_shade_all = g_pk_lx >= 0 && g_pk_k >= 0 && k > g_pk_k && p->item != 2;   /* above the lantern: backlit (the castle has its own rules: the light through its arch and windows) */
     switch (p->item) {
-        case 2:  draw_castle(c, p->cx, 0, final); if (p->z == DECOR_Z_BACK) arch_shade(c, k, p->cx, t->night, false); break;
+        case 2:  draw_castle(c, p->cx, 0, final); if (p->z == DECOR_Z_BACK || record) arch_shade(c, k, p->cx, t->night, false); break;   /* IN FRONT: the bake carries the tunnel's shade too (2026-10-23); live, arch_shade_dirty does the rest */
         case 3:  draw_coral(c, p->cx, tank_coral_rgb(t), tank_coral_growth(t), final); break;
         case 4:  draw_cluster(c, p->cx, tank_cluster_scheme(t), tank_cluster_growth(t), final); break;
+        case 9:  draw_volcano(c, p->cx, t->night, final); break;
         default: draw_pumpkin(c, p->cx, t->night, t->clock, final, true, final); break;
     }
     g_pk_shade_all = false;
     g_rec = NULL;
+    if (record) pc_contact_shadow(c, k);
 }
 /* a piece's overlay, drawn every frame over the baked body: a crown's
  * tentacles - clipped by the pieces above it (g_clip_k); its rect joins the
@@ -2730,6 +3936,9 @@ static void pc_draw(ctx_t *c, const tank_t *t, int k, bool final, bool record) {
         if (g_pc[k].item == 3) draw_coral_crown(&c, g_pc[k].cx, tank_coral_rgb(t), tank_coral_growth(t), t->clock, &qx0, &qy0, &qx1, &qy1); \
         else if (g_pc[k].item == 4) draw_cluster_crown(&c, g_pc[k].cx, tank_cluster_scheme(t), tank_cluster_growth(t), t->clock, &qx0, &qy0, &qx1, &qy1); \
         if (qx1 >= qx0) DYN_RECT(qx0, qy0, qx1, qy1); } while (0)
+/* the volcano's: its lava breathes over the baked rock, its bubbles rise (their rect joins the sweep) */
+#define PC_VOLCANO(k) do { if (g_pc[k].baked) draw_volcano_glow(&c, g_pc[k].cx, t->clock, t->night, false, true); \
+        int qx0, qy0, qx1, qy1; draw_volcano_bubbles(&c, g_pc[k].cx, t->clock, t->night, &qx0, &qy0, &qx1, &qy1); DYN_RECT(qx0, qy0, qx1, qy1); } while (0)
 #define PK_LIGHT_Y (PK_FY - (int)(8.0f * PK_S * PK_CELL))   /* the face's middle: where the light leaves */
 
 /* the floor's colour at (x,y), from a position hash so it is stable every
@@ -2763,7 +3972,7 @@ static void draw_scene(const tank_t *t, uint16_t *fb, int stride, float dim) {
     ctx_t c = ctx_full(fb, stride, dim);
     /* water gradient #0a3c46 → #08272f → #031015 */
     for (int y = 0; y < TANK_H; y++) {
-        uint16_t v = rgb565(water_rgb(y), dim);
+        uint16_t v = FB_SWAP16(rgb565(water_rgb(y), dim));
         for (int x = 0; x < TANK_W; x++) fb[y * stride + x] = v;
     }
     /* pebbled bottom: irregular top edge, speckled stones in three tones.
@@ -2773,12 +3982,15 @@ static void draw_scene(const tank_t *t, uint16_t *fb, int stride, float dim) {
         int top = TANK_BOT - 14 - (int)((h >> 8) % 5);
         for (int y = top; y < TANK_H; y++) {
             uint32_t col = floor_rgb(x, y);
-            fb[y * stride + x] = rgb565(col, dim);
+            fb[y * stride + x] = FB_SWAP16(rgb565(col, dim));
         }
     }
     /* (the dark oval under the left bed - the "reef rock" - is gone, 2026-10-02:
        it stood for nothing; the reef is the cluster the keeper buys) */
-    for (int k = 0; k < g_npc; k++) if (!g_pc[k].placing) pc_draw(&c, t, k, false, false);   /* uncached: every piece, in order, every frame */
+    for (int k = 0; k < g_npc; k++)                 /* uncached: every piece, in order, every frame - a dragged piece too when it is BEHIND, and the
+                                                       castle whole (its keep goes under the fish), as the cached path draws them (0.3.9: before,
+                                                       a dragged castle had only its front row here) */
+        if (!g_pc[k].placing || g_pc[k].z == DECOR_Z_BACK || g_pc[k].item == 2) pc_draw(&c, t, k, false, false);
 }
 
 
@@ -2803,7 +4015,7 @@ static void bake_scene(const tank_t *t, uint16_t *sc, float dim) {
             if (r5 > 31) r5 = 31;
             if (g6 > 63) g6 = 63;
             if (b5 > 31) b5 = 31;
-            sc[y * TANK_W + x] = (uint16_t)((r5 << 11) | (g6 << 5) | b5);
+            sc[y * TANK_W + x] = FB_SWAP16((uint16_t)((r5 << 11) | (g6 << 5) | b5));
         }
     }
     /* pebbled bottom: irregular top edge, speckled stones in three tones,
@@ -2817,11 +4029,12 @@ static void bake_scene(const tank_t *t, uint16_t *sc, float dim) {
             int r = (int)(((col >> 16) & 255) * dim) * inv >> 8;
             int g = (int)(((col >> 8) & 255) * dim) * inv >> 8;
             int b = (int)((col & 255) * dim) * inv >> 8;
-            sc[y * TANK_W + x] = (uint16_t)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+            sc[y * TANK_W + x] = FB_SWAP16((uint16_t)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)));
         }
     }
     if (g_pk_lx >= 0) pk_halo(sc);                 /* the lantern's light on the water and the floor (the decor lights itself) */
     ctx_t c = ctx_full(sc, TANK_W, dim);
+    if (t->night) for (int k = 0; k < g_npc; k++) if (g_pc[k].item == 9 && g_pc[k].baked) vo_halo(sc, g_pc[k].cx);   /* the volcano's embers on the water and the sand (0.3.9) */
     for (int k = 0; k < g_npc; k++)                 /* the pieces, back to front, each recording its mask */
         if (g_pc[k].baked) pc_draw(&c, t, k, true, true);
 }
@@ -2833,6 +4046,7 @@ void render_tank(const tank_t *t, uint16_t *fb, int stride) {
     bool cached = g_scene && g_dirty && stride == TANK_W;
     g_dirty_hold = false;                          /* the tank draws in the frame's coordinates: its marks count */
     if (cached) memset(g_dirty, 0, TANK_H * DIRTY_WORDS_PER_ROW * sizeof(uint32_t));
+    if (g_touched) memset(g_touched, 0, TANK_H * DIRTY_WORDS_PER_ROW * sizeof(uint32_t));   /* this frame's marks begin here */
     struct { short x0, y0, x1, y1; } rects[6 + MAX_FOOD + MAX_BUBBLE + N_FISH_MAX + VEG_BEDS_MAX + SHRIMP_MAX];
     int nr = 0;
 #define DYN_RECT(cx0, cy0, cx1, cy1) do { if (cached && nr < (int)(sizeof rects / sizeof rects[0])) { \
@@ -2840,13 +4054,16 @@ void render_tank(const tank_t *t, uint16_t *fb, int stride) {
         rects[nr].x1 = (short)(cx1); rects[nr].y1 = (short)(cy1); nr++; } } while (0)
 
     bool front = cached && !setup_is_place();      /* the pieces IN FRONT ride in the scene, but for a placement page's drag */
+    bool sgv = false;                              /* the frame is primed from the grass cache (below) */
     pieces_build(t, cached, front);
     int pkx = g_pk_k >= 0 ? g_pc[g_pk_k].cx : -1, pkz = g_pk_k >= 0 ? g_pc[g_pk_k].z : DECOR_Z_BACK;
     bool pk_in_scene = g_pk_k >= 0 && !g_pc[g_pk_k].placing;
     g_pk_lx = t->night && pk_in_scene ? pkx : -1; g_pk_ly = PK_LIGHT_Y;     /* the lantern's light, this frame */
     if (g_pk_lx >= 0) pk_lut_fill();
     { int kc = pc_index(2); g_veg_mask_cx = kc >= 0 && g_pc[kc].z == DECOR_Z_FRONT ? g_pc[kc].cx : -1;   /* the castle IN FRONT: its arch's passes */
-      g_pk_under_castle = kc >= 0 && g_pk_k >= 0 && kc > g_pk_k; }                                        /* the castle over the lantern: its shadow's rules */
+      g_pk_under_castle = kc >= 0 && g_pk_k >= 0 && kc > g_pk_k;                                          /* the castle over the lantern: its shadow's rules */
+      g_veg_arch_night = t->night;                                                                        /* the back grass in the arch shades itself (veg_put), by arch_shade's rule */
+      g_veg_arch_shade = g_veg_mask_cx >= 0 && g_pc[kc].baked && !(t->night && g_pk_under_castle && g_pk_lx >= 0); }   /* (a castle not in the scene - dragged, no cache - has its whole arch shaded at the frame's end instead) */
     g_pk_shadows = g_pk_lx >= 0 && (pkz == DECOR_Z_BACK || g_pk_k < g_npc - 1);                           /* something stands in front of the lantern */
     if (g_pk_shadows) pk_casts(t, pkx); else g_pk_cast_n = 0;
     if (cached) {
@@ -2868,8 +4085,10 @@ void render_tank(const tank_t *t, uint16_t *fb, int stride) {
             if (g_vig) g_vig_filled = true;
             g_scene_dim = dim; g_scene_epoch++;
         }
-        if (!(g_primed_fb == fb && g_primed_epoch == g_scene_epoch))
-            memcpy(fb, g_scene, TANK_W * TANK_H * sizeof(uint16_t));
+        sgv = front && g_sg_on && g_sg_ok && g_sg_scene_ep == g_scene_epoch;   /* primed with the back grass in it */
+        { unsigned sep = sgv ? (0x80000000u | g_sg_ep) : g_scene_epoch;
+          if (!(g_primed_fb == fb && g_primed_epoch == sep))
+              memcpy(fb, sgv ? g_sceneg : g_scene, TANK_W * TANK_H * sizeof(uint16_t)); }
         g_primed_fb = NULL;
         /* a piece BEHIND that is not in the scene (dragged): live, right over it;
            the castle too, whole, when it is not baked (its front row again after
@@ -2879,13 +4098,16 @@ void render_tank(const tank_t *t, uint16_t *fb, int stride) {
     } else draw_scene(t, fb, stride, dim);
     /* the overlays of the pieces BEHIND: a crown over its baked fan, the
        candle's face over the lantern's body - under the grass */
+    if (sgv) g_under = g_bgmask;                     /* the grass is in the frame already: these stay under it */
     for (int k = 0; k < g_npc; k++) {
         if (g_pc[k].z != DECOR_Z_BACK) continue;
         g_clip_k = k;
         if (g_pc[k].item == 3 || g_pc[k].item == 4) PC_CROWN(k);
         else if (g_pc[k].item == 8 && g_pc[k].baked) draw_pumpkin_glow(&c, g_pc[k].cx, t->clock, t->night, false, true);
+        else if (g_pc[k].item == 9) PC_VOLCANO(k);
         g_clip_k = -1;
     }
+    g_under = NULL;
     PROF_ADD(0, p0);
 
     PROF_ADD(1, p0);   /* stage 1 (light shafts) retired 2026-09-01 */
@@ -2900,17 +4122,66 @@ void render_tank(const tank_t *t, uint16_t *fb, int stride) {
 #define VEG_PASS(b, layer) do { g_veg_skip = veg_skip_for(t, (b)); \
         g_pk_shade_all = g_pk_lx >= 0 && ((b) == 3 ? tank_decor_above(t, 0, 8) : pkz == DECOR_Z_BACK); \
         draw_veg(&c, t, (b), veg_seed[(b)], (layer), cached); g_pk_shade_all = false; } while (0)
-    for (int b = 0; b < tank_veg_beds(t); b++)          /* a BACK-layer piece first: behind the grass too */
-        if (bed_z(t, b) == DECOR_Z_BACK) VEG_PASS(b, -1);
-    for (int b = 0; b < tank_veg_beds(t); b++)
-        if (bed_z(t, b) == DECOR_Z_MIDDLE) VEG_PASS(b, 0);
+    if (!sgv) {                                      /* (the grass cache holds them: the frame was primed with them) */
+        for (int b = 0; b < tank_veg_beds(t); b++)      /* a BACK-layer piece first: behind the grass too */
+            if (bed_z(t, b) == DECOR_Z_BACK) VEG_PASS(b, -1);
+        for (int b = 0; b < tank_veg_beds(t); b++)
+            if (bed_z(t, b) == DECOR_Z_MIDDLE) VEG_PASS(b, 0);
+    }
+    /* THE CRAB'S PLACES in the frame (2026-10-24, Strato on the 1.8 and the square: "if the crab is meant to be
+       inside the cave or castle, nothing visible should really be behind it"):
+       - cr_deep: in or on its way into a shelter (ROOST, SHELTER) it is the DEEPEST thing on the sand - drawn here,
+         before the shrimp and the fish, under the snail and the urchin, under the front fronds. A castle at either
+         depth works (its arch is open: the front row restores over the wall, the crab shows in the opening) and a
+         volcano BEHIND (baked in the scene);
+       - cr_slot: a volcano IN FRONT (its cave is painted rock: the restore would cover it) and the CLIMB on one, and
+         its front LANE on the sand (tank.h THE LANES; a dig is in front whatever the lane) - the front slot after
+         the pieces IN FRONT are restored, FIRST in it so the snail and the urchin in their front lane pass in front
+         of it (Strato, the 1.8), under the front fronds (which keep off the volcano's silhouette anyway); the
+         volcano's per-frame lava and embers keep off the crab (g_cr_guard in vo_store - Strato, the pendant);
+       - cr_top: a sand dollar held up - over the fronds, so the keeper sees it wherever it dug;
+       - else the critter pass with the snail and the urchin (its back lane on the sand). */
+    const bool cr_in = (t->sd_unlocks & SD_ITEM_CRAB) && t->cr_x >= 0;
+    const bool cr_vol_front = cr_in && tank_decor_in(t, 9) && tank_decor_z(t, 9) == DECOR_Z_FRONT
+                              && (t->cr_mode == CR_CLIMB || (t->cr_cave == 9 && (t->cr_mode == CR_ROOST || t->cr_mode == CR_SHELTER)));
+    const bool cr_deep = cr_in && t->cr_find <= 0 && !cr_vol_front && (t->cr_mode == CR_ROOST || t->cr_mode == CR_SHELTER);
+    /* ... and the deep crab follows its SHELTER'S DEPTH against the fronds (Strato 2026-10-24, the watch: the castle IN
+       FRONT, the crab in its arch painted behind the fronds seen through it - "the castle is different in that you can
+       see all the way to the back fronds through the arch"): a shelter BEHIND stands behind the fronds, so the crab in
+       it is under every frond (drawn before the arch pass, the back fronds painted over it again); a castle IN FRONT
+       stands before them, so the crab in its arch is over the fronds in the opening - drawn after the arch pass, still
+       before the shrimp and the fish, and the castle's front row restores over it where it meets the wall */
+    const bool cr_deep_front = cr_deep && t->cr_cave >= 0 && tank_decor_in(t, t->cr_cave) && tank_decor_z(t, t->cr_cave) == DECOR_Z_FRONT;
+    const bool cr_deep_back = cr_deep && !cr_deep_front;
+    bool cr_top = false, cr_slot = false;                        /* (decided with the lanes, below: with a page up or on the bare path the
+                                                                    front volcano's crab goes to the top lane, after the live piece) */
+    if (cr_deep_back) {
+        draw_crab(&c, t);                                        /* (its rect is marked in the critter pass) */
+        /* THE WEAVE kept (Strato 2026-10-24, the square: one frond still drawn behind the crab in the cave): the
+           back fronds - a MIDDLE bed's even ones, a BACK bed's all - again over its rect, after it, not final (the
+           sweep vignettes them with the rect), so no frond of any bed sits behind a crab in its cave. Not with the
+           grass cache on: there the crab is drawn under the cached grass to begin with. */
+        if (!sgv) {
+            const int feet = (int)floorf(CR_FLOOR_Y - t->cr_y);
+            const int wx0 = (int)t->cr_x - 28, wy0 = feet - CR_GH - 8, wx1 = (int)t->cr_x + 28, wy1 = feet + 1;
+            ctx_t cw = c; cw.fb = &CTX_PX(&c, wx0, wy0); cw.ox = wx0; cw.oy = wy0; cw.w = wx1 - wx0 + 1; cw.h = wy1 - wy0 + 1;
+            for (int b = 0; b < tank_veg_beds(t); b++) {
+                float bx0, bx1; tank_veg_bed(t, b, &bx0, &bx1, NULL, NULL);
+                int z = bed_z(t, b);
+                if (z == DECOR_Z_FRONT || bx1 + 14 < wx0 || bx0 - 14 > wx1) continue;
+                g_veg_skip = veg_skip_for(t, b);
+                g_pk_shade_all = g_pk_lx >= 0 && (b == 3 ? tank_decor_above(t, 0, 8) : pkz == DECOR_Z_BACK);
+                draw_veg(&cw, t, b, veg_seed[b], z == DECOR_Z_BACK ? -1 : 0, false);
+                g_pk_shade_all = false;
+            }
+        }
+    }
         /* no DYN_RECT: with the scene cache each frond span vignettes itself */
     if (g_veg_mask_cx >= 0) {                        /* a castle IN FRONT: inside its open arch the late fronds go before the fish */
+        DYN_RECT(g_veg_mask_cx - CASTLE_ARCH_R, CASTLE_FY - CASTLE_ARCH_S - CASTLE_ARCH_R, g_veg_mask_cx + CASTLE_ARCH_R, CASTLE_FY);   /* (those are marked, not final: the sweep vignettes them) */
         g_veg_arch_pass = -1;
         for (int b = 0; b < tank_veg_beds(t); b++)
-            if (bed_z(t, b) == DECOR_Z_MIDDLE) VEG_PASS(b, 1);
-        for (int b = 0; b < tank_veg_beds(t); b++)
-            if (bed_z(t, b) == DECOR_Z_FRONT) VEG_PASS(b, -1);
+            if (bed_z(t, b) == DECOR_Z_MIDDLE) VEG_PASS(b, 1);     /* (a bed placed IN FRONT stands BEFORE the castle: no arch pass, no tunnel shade - the late pass draws it whole) */
         g_veg_arch_pass = 0;
     }
     PROF_ADD(2, p0);
@@ -2939,6 +4210,7 @@ void render_tank(const tank_t *t, uint16_t *fb, int stride) {
         px_blend(&c, (int)(b->x - r * 0.4f), (int)(b->y - r * 0.4f), 0xffffff, 120);
         DYN_RECT((int)b->x - 5, (int)b->y - 5, (int)b->x + 5, (int)b->y + 5);
     }
+    if (cr_deep_front) draw_crab(&c, t);                         /* in a castle IN FRONT's arch: over the fronds seen through it, under the shrimp and the fish (its rect is marked in the critter pass) */
     /* the shrimp school: on the sand and in the grass, under the fish and
        the front fronds (the grass is their cover) */
     if (t->sd_unlocks & SD_ITEM_SHRIMP) {
@@ -2967,19 +4239,44 @@ void render_tank(const tank_t *t, uint16_t *fb, int stride) {
         g_bb_on = false;
         if (g_bb_x1 >= g_bb_x0) DYN_RECT(g_bb_x0, g_bb_y0, g_bb_x1, g_bb_y1);
     }
+    PROF_ADD(7, p0);                                 /* the split of the stage below (2026-10-23): the fish */
     /* the snail on the floor (upright): in the scene, under the front fronds -
        unless it walks its front lane (tank_t.snail_front), drawn below, over
        the pieces placed IN FRONT */
+    /* THE LANES' front slot holds only while every piece IN FRONT is in the scene. With a placement page up (a
+       piece dragged live, over everything) - or on the bare path, which bakes nothing - a critter in its front
+       lane goes to the TOP lane instead, after the live pieces, so it stays before them as it was before the
+       baked ones (Strato 2026-10-24, the 1.8: the crab "dropped to the layer below behind the volcano when
+       opening the move menu"); over the fronds for as long as the page is up */
+    bool lanes = true;
+    for (int k = 0; k < g_npc; k++) if (g_pc[k].z == DECOR_Z_FRONT && !g_pc[k].baked) lanes = false;
+    const bool snail_lane = lanes && t->snail_front, urchin_lane = lanes && t->urchin_front;
+    const bool snail_top = !lanes && t->snail_front, urchin_top = !lanes && t->urchin_front;
+    /* THE STACK of the sand's critters (Strato 2026-10-24, the square: a crab backed into the volcano's cave drew over
+       the urchin passing it): the CRAB lowest, then the snail, then the urchin - whatever walks past a crab in its
+       cave, or a crab resting on the sand, is in front of it. The same order in the front slot below. */
+    /* the strawberry crab on the floor (0.3.9): its places are decided above the fish (THE CRAB'S PLACES); here, with
+       the snail and the urchin, only its back lane on the sand */
+    const bool cr_lane_case = (t->cr_lane_front || t->cr_mode == CR_DIG) && t->cr_mode != CR_CLIMB && t->cr_mode != CR_ROOST && t->cr_mode != CR_SHELTER;
+    cr_top = cr_in && (t->cr_find > 0 || (!lanes && (cr_vol_front || cr_lane_case)));   /* a page up / the bare path: the live pieces are drawn over everything, so a crab before one goes after them */
+    cr_slot = cr_in && !cr_top && lanes && (cr_vol_front || cr_lane_case);
+    if (cr_in) {
+        if (!cr_top && !cr_deep && !cr_slot) draw_crab(&c, t);
+        const int feet = (int)floorf(CR_FLOOR_Y - t->cr_y);
+        if (t->cr_tilt == 0) DYN_RECT((int)t->cr_x - 27, feet - CR_GH, (int)t->cr_x + 27, feet + 1);
+        else DYN_RECT((int)t->cr_x - 36, feet - 35, (int)t->cr_x + 36, feet + 36);
+    }
     if (tank_snail_upright(t)) {
-        if (!t->snail_front) draw_snail(&c, t, true);
+        if (!snail_lane && !snail_top) draw_snail(&c, t, true);                                    /* (its front lane: the slot below, or the top lane with a page up) */
         DYN_RECT((int)t->snail_x - 21, (int)t->snail_y - 13, (int)t->snail_x + 21, (int)t->snail_y + 7);
     }
     /* the urchin on the floor: with the fish, under the front fronds - at a
        bed's foot the grass weaves over it */
     if ((t->sd_unlocks & SD_ITEM_URCHIN) && t->urchin_x >= 0) {
-        draw_urchin(&c, t);
-        DYN_RECT((int)t->urchin_x - 19, (int)URCHIN_FLOOR_Y - 17, (int)t->urchin_x + 19, (int)(URCHIN_FLOOR_Y + UR_BASE) + 1);
+        if (!urchin_lane && !urchin_top) draw_urchin(&c, t);                                        /* (its front lane: the slot below, or the top lane with a page up) */
+        DYN_RECT((int)t->urchin_x - 19, (int)URCHIN_FLOOR_Y - 17, (int)t->urchin_x + 19, (int)(URCHIN_FLOOR_Y + UR_BASE + t->urchin_dy) + 1);
     }
+    PROF_ADD(8, p0);                                 /* the snail, the urchin and the crab */
     /* the pieces IN FRONT back over the fish (and the snail, the food, the
        bubbles), only where they were drawn: the scene holds them. The castle's
        front row comes back the same way - a fish in the arch swims THROUGH,
@@ -2990,32 +4287,74 @@ void render_tank(const tank_t *t, uint16_t *fb, int stride) {
         if (g_pc[k].baked) pc_restore(fb, k);
         else if (g_pc[k].item == 2) draw_castle(&c, g_pc[k].cx, 1, cached);
     }
+    PROF_ADD(9, p0);                                 /* the pieces IN FRONT back over them */
+    /* THE FRONT SLOT (2026-10-24, a keeper's ask): the sand's critters in their front lane - over the pieces IN
+       FRONT just restored, under the front fronds that follow (woven through the grass like a fish). Their rects
+       are marked above. The snail's lane lived above the fronds until today. */
+    if (cr_slot) draw_crab(&c, t);                                                                 /* the crab lowest (the stack above) */
+    if (tank_snail_upright(t) && snail_lane) draw_snail(&c, t, true);
+    if ((t->sd_unlocks & SD_ITEM_URCHIN) && t->urchin_x >= 0 && urchin_lane) draw_urchin(&c, t);
     /* vegetation, FRONT layer: the alternating fronds drawn over the fish,
        so a fish inside a canopy is woven through it (each span applies its
        own vignette and untags itself, so the fish rects below skip it) */
     if (g_veg_mask_cx >= 0) g_veg_arch_pass = 1;     /* (the arch's pixels were drawn before the fish) */
     for (int b = 0; b < tank_veg_beds(t); b++)
         if (bed_z(t, b) == DECOR_Z_MIDDLE) VEG_PASS(b, 1);
-    for (int b = 0; b < tank_veg_beds(t); b++)          /* a FRONT-layer piece last: over the grass and the fish */
-        if (bed_z(t, b) == DECOR_Z_FRONT) VEG_PASS(b, -1);
-    g_veg_arch_pass = 0;
+    g_veg_arch_pass = 0;                             /* a bed placed IN FRONT last, WHOLE: over the grass, the fish, the critters and every piece it is
+                                                        ranked above - the castle's arch included, and its fronds there take no tunnel shade (2026-10-24,
+                                                        Strato on the 1.8: the sword plant IN FRONT drawn behind the crab in the castle, and tinted) */
+    { const bool shade = g_veg_arch_shade; g_veg_arch_shade = false;
+      for (int b = 0; b < tank_veg_beds(t); b++)
+          if (bed_z(t, b) == DECOR_Z_FRONT) VEG_PASS(b, -1);
+      g_veg_arch_shade = shade; }
 #undef VEG_PASS
+    PROF_ADD(10, p0);                                /* the front grass */
     /* the pieces IN FRONT that are not in the scene (a placement page is up,
        or no scene cache): live, in order, over everything; then every piece
        IN FRONT's overlay - its crown, the candle - clipped by the pieces
        above it */
     for (int k = 0; k < g_npc; k++)
         if (g_pc[k].z == DECOR_Z_FRONT && !g_pc[k].baked && g_pc[k].item != 2) pc_draw(&c, t, k, cached, false);
+    /* a castle IN FRONT ranked above other pieces IN FRONT, none of them in the
+       scene (a placement page is up, or no cache): the pass above drew those
+       over its keep and its front row. The castle again, whole, inside each
+       one's box - the keep over them, as the scene has it. The fish there were
+       under them already, and the arch's opening is not painted, so nothing
+       else moves (0.3.9, Strato: "when I tap and hold the castle, it falls
+       behind the volcano visually even when it shows IN FRONT OF THE VOLCANO;
+       once I press DONE it snaps back") */
+    { int kc = pc_index(2);
+      if (kc >= 0 && g_pc[kc].z == DECOR_Z_FRONT && !g_pc[kc].baked)
+          for (int j = 0; j < kc; j++) {
+              const piece_t *a = &g_pc[j], *b = &g_pc[kc];
+              if (a->z != DECOR_Z_FRONT || a->baked) continue;
+              int x0 = a->x0 > b->x0 ? a->x0 : b->x0, x1 = (a->x0 + a->w < b->x0 + b->w ? a->x0 + a->w : b->x0 + b->w) - 1;
+              int y0 = a->y0 > b->y0 ? a->y0 : b->y0, y1 = (a->y0 + a->rows < b->y0 + b->rows ? a->y0 + a->rows : b->y0 + b->rows) - 1;
+              if (x0 > x1 || y0 > y1) continue;
+              g_cst_clip = true; g_cst_clip_x0 = x0; g_cst_clip_y0 = y0; g_cst_clip_x1 = x1; g_cst_clip_y1 = y1;
+              draw_castle(&c, b->cx, 0, cached);
+              g_cst_clip = false;
+          }
+    }
+    g_cr_guard = cr_slot ? t : NULL;                          /* the crab in the front slot - in the front volcano's cave, on its flank, or digging / resting / walking
+                                                                  before it in its front lane: the lava's cells keep off it (Strato, the 1.8: a dig at the cave mouth) */
     for (int k = 0; k < g_npc; k++) {
         if (g_pc[k].z != DECOR_Z_FRONT) continue;
         g_clip_k = k;
         if (g_pc[k].item == 3 || g_pc[k].item == 4) PC_CROWN(k);
         else if (g_pc[k].item == 8 && g_pc[k].baked) draw_pumpkin_glow(&c, g_pc[k].cx, t->clock, t->night, false, true);
+        else if (g_pc[k].item == 9) PC_VOLCANO(k);
         g_clip_k = -1;
     }
-    if (tank_snail_upright(t) && t->snail_front) draw_snail(&c, t, true);   /* its front lane: over them (its rect is marked above) */
+    g_cr_guard = NULL;
+    PROF_ADD(11, p0);                                /* the front pieces' overlays (crowns, the candle, the lava) */
     if ((t->sd_unlocks & SD_ITEM_SEAHORSE) && t->sh_x >= 0 && t->sh_front) draw_seahorse(&c, t);   /* the seahorse's front lane (its rect is marked above) */
-    { int kc = pc_index(2); if (kc >= 0 && g_pc[kc].z == DECOR_Z_FRONT) arch_shade(&c, kc, g_pc[kc].cx, t->night, true); }   /* the tunnel through a castle IN FRONT: shaded, whatever passes it */
+    if (cr_top) draw_crab(&c, t);                                                                      /* the crab holding a find up; a page up: its front lane (its rect is marked above) */
+    if (tank_snail_upright(t) && snail_top) draw_snail(&c, t, true);                                   /* a page up: the snail's and the urchin's front lane, after the live pieces */
+    if ((t->sd_unlocks & SD_ITEM_URCHIN) && t->urchin_x >= 0 && urchin_top) draw_urchin(&c, t);
+    PROF_ADD(12, p0);                                /* the seahorse's front lane, the crab's top lane */
+    { int kc = pc_index(2); if (kc >= 0 && g_pc[kc].z == DECOR_Z_FRONT) { if (g_pc[kc].baked && cached) arch_shade_dirty(&c, kc, g_pc[kc].cx, t->night); else arch_shade(&c, kc, g_pc[kc].cx, t->night, true); } }   /* the tunnel through a castle IN FRONT: what passed it this frame (the scene carries the rest) */
+    PROF_ADD(13, p0);                                /* the arch's shade */
     PROF_ADD(4, p0);
     /* porthole vignette: darken corners toward AMOLED black. With a scene
        cache the full-frame pass is baked into the scene and only the dynamic
@@ -3084,6 +4423,32 @@ void render_tank(const tank_t *t, uint16_t *fb, int stride) {
     PROF_ADD(5, p0);
     draw_algae(&c, t);
     draw_snail(&c, t, false);                    /* on the glass, over the film */
+    /* the grass cache: rebuilt when it is stale (a rebake, the first frame) or
+       its period is up - the rows the old grass reached copied back from the
+       scene, the back grass painted in, its pixels recorded. The prefetch of
+       the next frame starts after this, so it copies the new cache. */
+    if (front && g_sg_on && (!sgv || t->clock - g_sg_clock >= g_sg_period || t->clock < g_sg_clock)) {
+        int64_t q0 = render_clock_us ? render_clock_us() : 0;
+        bool whole = !g_sg_ok || g_sg_scene_ep != g_scene_epoch;
+        int top = whole ? 0 : (g_sg_top < 0 ? 0 : g_sg_top);
+        if (whole) memcpy(g_sceneg, g_scene, (size_t)TANK_W * TANK_H * sizeof(uint16_t));
+        else render_restore_touched(g_sceneg, g_bgmask);   /* only the words the old grass covered, back from the scene (a whole copy of its rows
+                                                              cost half of a rebuild's 24 ms on the square) */
+        memset(g_bgmask + top * DIRTY_WORDS_PER_ROW, 0, (size_t)(TANK_H - top) * DIRTY_WORDS_PER_ROW * 4);
+        uint32_t *keep_t = g_touched; g_touched = NULL;
+        ctx_t cg = ctx_full(g_sceneg, TANK_W, dim);
+        g_sg_top = TANK_H; g_bg_rec = true; g_veg_arch_pass = 0;
+#define SG_PASS(b, layer) do { g_veg_skip = veg_skip_for(t, (b)); \
+        g_pk_shade_all = g_pk_lx >= 0 && ((b) == 3 ? tank_decor_above(t, 0, 8) : pkz == DECOR_Z_BACK); \
+        draw_veg(&cg, t, (b), VEG_SEED[(b)], (layer), true); g_pk_shade_all = false; } while (0)
+        for (int b = 0; b < tank_veg_beds(t); b++) if (bed_z(t, b) == DECOR_Z_BACK) SG_PASS(b, -1);
+        for (int b = 0; b < tank_veg_beds(t); b++) if (bed_z(t, b) == DECOR_Z_MIDDLE) SG_PASS(b, 0);
+#undef SG_PASS
+        g_bg_rec = false; g_touched = keep_t;
+        if (g_sg_top == TANK_H) g_sg_top = TANK_H - 1;
+        g_sg_ok = true; g_sg_scene_ep = g_scene_epoch; g_sg_clock = t->clock; g_sg_ep = (g_sg_ep + 1) & 0x7fffffffu;
+        if (render_clock_us) { g_sg_us += render_clock_us() - q0; g_sg_n++; }
+    }
     g_pk_lx = -1; g_pk_under_castle = false; g_pk_shadows = false;   /* the light is this frame's: no page is ever lit by it */
     PROF_ADD(6, p0);
 #undef DYN_RECT
@@ -3189,11 +4554,11 @@ static void ring(ctx_t *c, float cx, float cy, float r, uint32_t rgb) {
  * ignores night, matching px_blend's use with c->dim = 1) */
 static void px565_blend(ctx_t *c, int x, int y, uint16_t v, int a) {
     if (!CTX_IN(c, x, y)) return;
-    uint16_t *p = &CTX_PX(c, x, y);
-    int r = (*p >> 11)       + (((v >> 11)       - (*p >> 11))       * a >> 8);
-    int g = ((*p >> 5) & 63) + ((((v >> 5) & 63) - ((*p >> 5) & 63)) * a >> 8);
-    int b = (*p & 31)        + (((v & 31)        - (*p & 31))        * a >> 8);
-    *p = (uint16_t)((r << 11) | (g << 5) | b);
+    uint16_t *p = &CTX_PX(c, x, y), cur = FB_SWAP16(*p);
+    int r = (cur >> 11)       + (((v >> 11)       - (cur >> 11))       * a >> 8);
+    int g = ((cur >> 5) & 63) + ((((v >> 5) & 63) - ((cur >> 5) & 63)) * a >> 8);
+    int b = (cur & 31)        + (((v & 31)        - (cur & 31))        * a >> 8);
+    *p = FB_SWAP16((uint16_t)((r << 11) | (g << 5) | b)); TOUCH_PX(c, x, y);
 }
 
 /* draw a baked icon (icons.h, generated from Strato's pixel art) at x,y.
@@ -3355,8 +4720,53 @@ static void snail_card_draw(ctx_t *c, const tank_t *t) {
 /* the urchin's card (2026-10-02), the snail's: a ring on it, the urchin
    at 3x with its spines waving, SEA URCHIN, the grass it has eaten so far
    (the trim's centimeters) and what it is up to - in words, never colour. */
+/* the crab's card (0.3.9; Strato 10-23: "we need to add a modal for when the user taps it"), the urchin's way:
+   a ring on it, a centred card - the crab facing the glass at 2x (its own grid: the tank's may be a profile),
+   STRAWBERRY CRAB, the pellets it has found, what it is doing */
+static void crab_card_draw(ctx_t *c, const tank_t *t) {
+    ring(c, t->cr_x, CR_FLOOR_Y - t->cr_y - 10, 24, 0x9fd8e2);
+    const int W = CRAB_CARD_W, H = CRAB_CARD_H, X = (TANK_W - W) / 2, Y = (TANK_H - H) / 2;
+    src_t bg = src_color(0x04141a, 1.0f);
+    for (int y = Y; y < Y + H; y++) span(c, X, X + W - 1, y, &bg, 235);
+    rect_edge(c, X, Y, W, H, 0x9fd8e2); rect_edge(c, X + 1, Y + 1, W - 2, H - 2, 0x1c2f36);
+    static uint32_t s_key = 0;
+    cr_pose_t p; memset(&p, 0, sizeof p); p.salt = 7 + t->cr_variant;   /* the portrait: its roost, breathing; open-clawed while poked */
+    cr_pose_roost(&p, 0, 0, t->cr_poke > 0, fast_sin(t->clock * 0.9f + 4 * TAU) > 0.35f);
+    const uint32_t key = cr_hash(&p);
+    if (key != s_key) { cr_build(ds()->cr_card_tones, ds()->cr_card_parts, &p); s_key = key; }
+    const int S = UI_TEXT(2), ox = X + (W - CR_GW * S) / 2, oy = Y + UI(10);   /* (this fork) 2x on the 1.8, 1x on the CYD */
+    for (int gy = 0; gy < CR_GH; gy++)
+        for (int gx = 0; gx < CR_GW; gx++) {
+            int tone = ds()->cr_card_tones[gy * CR_GW + gx];
+            if (tone == CRT_NONE) continue;
+            src_t sc = src_color(CR_RGB[tone], 1.0f);
+            for (int yy = 0; yy < S; yy++) span(c, ox + gx * S, ox + gx * S + S - 1, oy + gy * S + yy, &sc, 255);
+        }
+    draw_text(c, X + (W - text_w("STRAWBERRY CRAB", UI_TEXT(3))) / 2, Y + UI(70), UI_TEXT(3), 0xffffff, "STRAWBERRY CRAB");
+    {   /* two counts side by side: the pellets it found, the sand dollars it dug up (0.3.9) */
+        const int L = X + W / 4, R = X + 3 * W / 4;
+        char n[16];
+        draw_text(c, L - text_w("PELLETS", UI_TEXT(2)) / 2, Y + UI(104), UI_TEXT(2), 0x9fd8e2, "PELLETS");
+        if (t->cr_eaten == 0) snprintf(n, sizeof n, "NONE YET"); else snprintf(n, sizeof n, "%u", (unsigned)t->cr_eaten);
+        draw_text(c, L - text_w(n, UI_TEXT(3)) / 2, Y + UI(126), UI_TEXT(3), 0xffffff, n);
+        draw_text(c, R - text_w("SAND DOLLARS", UI_TEXT(2)) / 2, Y + UI(104), UI_TEXT(2), 0x9fd8e2, "SAND DOLLARS");
+        if (t->cr_found == 0) snprintf(n, sizeof n, "NONE YET"); else snprintf(n, sizeof n, "%u", (unsigned)t->cr_found);
+        draw_text(c, R - text_w(n, UI_TEXT(3)) / 2, Y + UI(126), UI_TEXT(3), 0xffffff, n);
+    }
+    const char *now = t->cr_find > 0 ? "FOUND A SAND DOLLAR!"
+                    : t->cr_scurry ? "RUNNING FOR COVER"
+                    : (t->cr_mode == CR_ROOST && t->cr_hide > 0) ? (t->cr_cave == 2 ? "HIDING IN THE CASTLE" : "HIDING IN THE CAVE")
+                    : t->cr_mode == CR_ROOST ? (t->cr_cave == 2 ? "ROOSTING IN THE CASTLE" : t->cr_cave == 9 ? "ROOSTING IN THE CAVE" : "ROOSTING")
+                    : t->cr_mode == CR_SHELTER ? (t->cr_cave == 2 ? "OFF TO THE CASTLE" : "OFF TO THE CAVE")
+                    : t->cr_mode == CR_DIG ? "PICKING AT THE SAND"
+                    : t->cr_mode == CR_FEED ? "GOING FOR FOOD"
+                    : t->cr_mode == CR_EAT ? "EATING"
+                    : t->cr_mode == CR_CLIMB ? "CLIMBING THE VOLCANO"
+                    : t->cr_mode == CR_WALK ? "OUT FOR A WALK" : "RESTING";
+    draw_text(c, X + (W - text_w(now, UI_TEXT(2))) / 2, Y + UI(162), UI_TEXT(2), 0x9fd8e2, now);
+}
 static void urchin_card_draw(ctx_t *c, const tank_t *t) {
-    ring(c, t->urchin_x, URCHIN_FLOOR_Y - 3, 22, 0x9fd8e2);
+    ring(c, t->urchin_x, URCHIN_FLOOR_Y + t->urchin_dy - 3, 22, 0x9fd8e2);
     const int W = URCHIN_CARD_W, H = URCHIN_CARD_H, X = (TANK_W - W) / 2, Y = (TANK_H - H) / 2;
     src_t bg = src_color(0x04141a, 1.0f);
     for (int y = Y; y < Y + H; y++) span(c, X, X + W - 1, y, &bg, 235);
@@ -3374,9 +4784,12 @@ static void urchin_card_draw(ctx_t *c, const tank_t *t) {
     const char *cap = "GRASS GRAZED SO FAR";
     draw_text(c, X + (W - text_w(cap, UI_TEXT(2))) / 2, Y + UI(118), UI_TEXT(2), 0x9fd8e2, cap);
     char n[24]; int cm = (int)(t->urchin_grazed_px / PX_PER_CM);
+    /* CM under a meter, then M with one decimal, KM past a kilometer (0.3.9,
+       Strato: "1.4K CM is odd"); the longest line, "999.9 M", fits the card */
     if (cm < 1) snprintf(n, sizeof n, "NOTHING YET");
-    else if (cm < 1000) snprintf(n, sizeof n, "%d CM", cm);
-    else snprintf(n, sizeof n, "%d.%dK CM", cm / 1000, cm % 1000 / 100);   /* 1.0K CM and up: the line never outgrows the card (0.3.2) */
+    else if (cm < 100) snprintf(n, sizeof n, "%d CM", cm);
+    else if (cm < 100000) snprintf(n, sizeof n, "%d.%d M", cm / 100, cm % 100 / 10);
+    else snprintf(n, sizeof n, "%d.%d KM", cm / 100000, cm % 100000 / 10000);
     draw_text(c, X + (W - text_w(n, UI_TEXT(3))) / 2, Y + UI(140), UI_TEXT(3), 0xffffff, n);
     const char *now = tank_urchin_chewing(t) ? "CHEWING"
                     : t->urchin_frond >= 0 ? "OFF TO THE TALL GRASS"
@@ -3482,6 +4895,7 @@ static void seahorse_card_draw(ctx_t *c, const tank_t *t) {
 }
 
 static void tools_draw(ctx_t *c, const tank_t *t);   /* the toolbox, below */
+static void next_draw(ctx_t *c, const tank_t *t);    /* the NEXT FISH arrow, below */
 void render_stats_card(const tank_t *t, int fish_idx, uint16_t *fb, int stride) {
     if (fish_idx == RENDER_CARD_SHRIMP) {
         if (!(t->sd_unlocks & SD_ITEM_SHRIMP) || t->shrimp_n <= 0) return;
@@ -3493,6 +4907,12 @@ void render_stats_card(const tank_t *t, int fish_idx, uint16_t *fb, int stride) 
         if (!(t->sd_unlocks & SD_ITEM_URCHIN) || t->urchin_x < 0) return;
         ctx_t sc = ctx_full(fb, stride, 1.0f);
         urchin_card_draw(&sc, t);
+        return;
+    }
+    if (fish_idx == RENDER_CARD_CRAB) {
+        if (!(t->sd_unlocks & SD_ITEM_CRAB) || t->cr_x < 0) return;
+        ctx_t sc = ctx_full(fb, stride, 1.0f);
+        crab_card_draw(&sc, t);
         return;
     }
     if (fish_idx == RENDER_CARD_SEAHORSE) {
@@ -3522,11 +4942,14 @@ void render_stats_card(const tank_t *t, int fish_idx, uint16_t *fb, int stride) 
             card_draw(cc, t, fish_idx);
             g_card_fish = fish_idx; g_card_epoch = ep; g_card_t = t->clock;
         }
-        for (int y = 0; y < RENDER_CARD_H; y++)
+        for (int y = 0; y < RENDER_CARD_H; y++) {
             memcpy(fb + (RENDER_CARD_Y + y) * stride + RENDER_CARD_X,
                    g_card + y * RENDER_CARD_W, RENDER_CARD_W * 2);
+            touch_span_f(RENDER_CARD_X, RENDER_CARD_X + RENDER_CARD_W - 1, RENDER_CARD_Y + y);
+        }
     } else card_draw(c, t, fish_idx);
     tools_draw(&c, t);
+    next_draw(&c, t);
 }
 
 /* ---- the toolbox (2026-10-01) ----
@@ -3540,7 +4963,8 @@ static void shade_box(ctx_t *c, int x, int y, int w, int h) {
         if ((unsigned)(yy - c->oy) >= (unsigned)c->h) continue;
         int x0 = x < c->ox ? c->ox : x, x1 = x + w - 1 > c->ox + c->w - 1 ? c->ox + c->w - 1 : x + w - 1;
         uint16_t *p = &CTX_PX(c, x0, yy);
-        for (int xx = x0; xx <= x1; xx++, p++) *p = (uint16_t)(((*p >> 3) & 0x18E3) + base);
+        for (int xx = x0; xx <= x1; xx++, p++) { uint16_t n = FB_SWAP16(*p); *p = FB_SWAP16((uint16_t)(((n >> 3) & 0x18E3) + base)); }
+        TOUCH_SPAN(c, x0, x1, yy);
     }
 }
 static void rect_fill(ctx_t *c, int x, int y, int w, int h, uint32_t rgb);   /* below */
@@ -3569,12 +4993,33 @@ static void tools_draw(ctx_t *c, const tank_t *t) {
     const icon_t *lk = t->tools_locked ? &icon_tool_lock_closed : &icon_tool_lock_open;
     blit_icon(c, LX + (LW - lk->w) / 2, LY + (LH - lk->h) / 2, lk, 255);
 }
+/* the NEXT FISH arrow (0.3.9) beside the card's top right: drawn every
+   frame like the lock (outside the card's cache) */
+static void next_draw(ctx_t *c, const tank_t *t) {
+    const int X = RENDER_NEXT_X, Y = RENDER_NEXT_Y, W = RENDER_NEXT_W, H = RENDER_NEXT_H;
+    const uint32_t rgb = t->n_fish > 1 ? 0x9fd8e2 : 0x2c4a52;
+    shade_box(c, X, Y, W, H);
+    rect_edge(c, X, Y, W, H, rgb); rect_edge(c, X + 1, Y + 1, W - 2, H - 2, 0x1c2f36);
+    int cx = X + W / 2, cy = Y + H / 2;
+    for (int i = 0; i < 9; i++) {                           /* a solid triangle, 9 wide, 17 tall, pointing on */
+        int hh = 8 - i;
+        rect_fill(c, cx - 4 + i, cy - hh, 1, 2 * hh + 1, rgb);
+    }
+}
+bool render_next_hit(float x, float y) {
+    return x >= RENDER_NEXT_X - RENDER_SIDE_GAP / 2 && x < RENDER_NEXT_X + RENDER_NEXT_W + 16 &&
+           y >= RENDER_NEXT_Y - 8 && y < RENDER_NEXT_Y + RENDER_NEXT_H + 12;
+}
+int render_next_fish(const tank_t *t, int fish_idx) {
+    if (fish_idx < 0 || fish_idx >= t->n_fish) return fish_idx;
+    return (fish_idx + 1) % t->n_fish;
+}
 bool render_lock_hit(float x, float y) {
-    return y >= RENDER_TOOLS_Y && x >= RENDER_LOCK_X && x < RENDER_LOCK_X + RENDER_LOCK_W + 16;
+    return y >= RENDER_TOOLS_Y && x >= RENDER_LOCK_X - RENDER_SIDE_GAP / 2 && x < RENDER_LOCK_X + RENDER_LOCK_W + 16;
 }
 int render_tools_hit(float x, float y) {
     const int X = RENDER_TOOLS_X, W = RENDER_TOOLS_W;
-    if (y < RENDER_TOOLS_Y || x < X - RENDER_CARD_HIT_SIDE || x >= X + W + RENDER_CARD_HIT_SIDE) return -1;
+    if (y < RENDER_TOOLS_Y || x < X - RENDER_CARD_HIT_SIDE || x >= X + W + RENDER_SIDE_GAP / 2) return -1;   /* (the right: half the gap, the lock has the rest) */
     return x < X + W / 2 ? TOOL_SPONGE : TOOL_SCISSORS;
 }
 
@@ -3756,7 +5201,7 @@ void render_fish_preview(uint16_t *fb, int stride, float x, float y, float size,
     f.hunger = 4; f.stress = 0; f.goal.id = GOAL_EXPLORE;
     f.color = body; f.fin = fin; f.accent = accent;
     tank_fish_face(&f);                          /* side-on, facing right */
-    draw_fish_core(&c, &f, clock, false, size);
+    draw_fish_core(&c, &f, clock, false, size, 1e9f);
 }
 void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size, const fish_t *who, float clock) {
     ctx_t c = ctx_page(fb, stride);
@@ -3766,7 +5211,7 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
     f.hunger = 4; f.stress = 0; f.goal.id = GOAL_EXPLORE;
     f.color = who->color; f.fin = who->fin; f.accent = who->accent;
     tank_fish_face(&f);
-    draw_fish_core(&c, &f, clock, false, size);
+    draw_fish_core(&c, &f, clock, false, size, 1e9f);
 }
 void render_confirm_reset(uint16_t *fb, int stride, float frac) {
     ctx_t c = ctx_page(fb, stride);              /* ignores night dimming, like the card */
@@ -3882,7 +5327,7 @@ static const badge_t FISH_BADGES[6] = {
     { MS_FIRST_GRASS, &icon_ms_first_seagrass },      { MS_FIRST_BUBBLES, &icon_ms_first_bubbles },   /* (the third was "first reef" until 0.3.0) */
     { MS_FIRST_FOLLOW, &icon_ms_first_follow },       { MS_FIRST_DART, &icon_ms_first_dart },
 };
-#define TANK_BADGE_N 10
+#define TANK_BADGE_N 11
 static const badge_t TANK_BADGES[TANK_BADGE_N] = {
     { TMS_FIRST_FEEDING, &icon_ms_first_feeding },    { TMS_FIRST_TRIM, &icon_ms_first_trimming },
     { TMS_FIRST_CLEANING, &icon_ms_first_glass_cleaning }, { TMS_FIRST_FULL_NIGHT, &icon_ms_first_quiet_night },
@@ -3891,6 +5336,7 @@ static const badge_t TANK_BADGES[TANK_BADGE_N] = {
     { TMS_FIRST_REEF, &icon_ms_first_reef },          /* 2026-10-02: only once the reef cluster is bought */
     { TMS_FIRST_SALE, &icon_ms_first_sale },          /* 0.3.5: a fish sold - the shop's fry */
     { TMS_SEAHORSE_FED, &icon_ms_seahorse_fed },      /* 0.3.6: only once the seahorse is bought (Strato: "visible and gray once purchased") */
+    { TMS_CRAB_FIND, &icon_ms_crab_find },            /* 0.3.9: only once the crab is bought - its first sand dollar, taken */
 };
 /* the tank row's pages (2026-09-30, the seventh badge): six badges a page;
    with more, a small arrow at the row's right end (or a sideways swipe along
@@ -3905,6 +5351,7 @@ static bool tank_badge_shown(const tank_t *t, int i) {
     if (bit == TMS_FIRST_REEF)  return (t->sd_unlocks & SD_ITEM_CLUSTER) || (t->tank_ms_bits & bit);
     if (bit == TMS_FIRST_SALE)  return (t->tank_ms_bits & bit) != 0;   /* 0.3.5: once earned (its notice says what it opened) */
     if (bit == TMS_SEAHORSE_FED) return (t->sd_unlocks & SD_ITEM_SEAHORSE) || (t->tank_ms_bits & bit);
+    if (bit == TMS_CRAB_FIND)   return (t->sd_unlocks & SD_ITEM_CRAB)     || (t->tank_ms_bits & bit);
     return true;
 }
 static int tank_badge_n(const tank_t *t) {
@@ -4029,6 +5476,7 @@ static const icon_t *badge_art(const icon_t *ic) {
         { &icon_ms_first_trimming, &icon_ms_first_trimming_24 },   { &icon_ms_sand_dollar, &icon_ms_sand_dollar_24 },
         { &icon_ms_seahorse_fed, &icon_ms_seahorse_fed_24 },       /* (v0.3.6's sync) ... and FIRST SEAHORSE FEEDING (0.3.6) */
         { &icon_ms_tank_changed_someone, &icon_ms_tank_changed_someone_24 },
+        { &icon_ms_crab_find, &icon_ms_crab_find_24 },             /* (v0.3.9's sync) the tank row's FIRST CRAB FIND (0.3.9) */
     };
     for (unsigned i = 0; i < sizeof SMALL / sizeof SMALL[0]; i++)
         if (SMALL[i].full == ic) return SMALL[i].small;
@@ -4118,7 +5566,7 @@ static void ms_step(const tank_t *t, int dir) {
 void render_milestones(const tank_t *t, uint16_t *fb, int stride) {
     ctx_t c = ctx_page(fb, stride);
     for (int y = 0; y < TANK_H; y++)
-        for (int x = 0; x < TANK_W; x++) fb[y * stride + x] = rgb565(MSP_INK, 1);
+        for (int x = 0; x < TANK_W; x++) fb[y * stride + x] = FB_SWAP16(rgb565(MSP_INK, 1));
     for (int i = 0; i < t->n_fish; i++) {
         const fish_t *f = &t->fish[i];
         int top = MSP_ROW_Y0 + i * MSP_ROW_H;
@@ -4192,15 +5640,16 @@ void render_milestones(const tank_t *t, uint16_t *fb, int stride) {
     /* the way out: a CLOSE button in the prompt's calm dress (a tap anywhere
        else never drops the page - too much to tap for that) */
     button(&c, MSP_CLOSE_X, MSP_CLOSE_Y, MSP_CLOSE_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "CLOSE", UI_TEXT(2));
-    button(&c, MSP_SET_X, MSP_SET_Y, MSP_SET_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "SETTINGS", UI_TEXT(2));   /* bottom left (2026-09-15) */
-    button(&c, MSP_UPG_X, MSP_CLOSE_Y, MSP_UPG_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "UPGRADES", UI_TEXT(2));   /* the shop, between them */
+    button(&c, MSP_UPG_X, MSP_CLOSE_Y, MSP_UPG_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "UPGRADES", UI_TEXT(2));   /* the shop: bottom left (the bowl: left of CLOSE) */
+    button(&c, MSP_SET_X, MSP_SET_Y, MSP_SET_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "SETTINGS", UI_TEXT(2));   /* between them (Strato, 2026-10-24: swapped with
+                                                                                                        UPGRADES, bottom left since 2026-09-15; the bowl's sits in the cap) */
     /* a modal up: the page under it is out of reach (any tap only closes the
        modal), so it LOOKS out of reach - every pixel at half (Strato: with
        CLOSE lit it looked like you could still tap it). One shift per
        pixel, so cheap enough for every frame. */
     if (g_ms_caption[0])
         for (int y = 0; y < TANK_H; y++)
-            for (int x = 0; x < TANK_W; x++) fb[y * stride + x] = (uint16_t)((fb[y * stride + x] >> 1) & 0x7bef);
+            for (int x = 0; x < TANK_W; x++) { uint16_t n = FB_SWAP16(fb[y * stride + x]); fb[y * stride + x] = FB_SWAP16((uint16_t)((n >> 1) & 0x7bef)); }
     /* the detail modal, in the reset prompt's dress: the art at 2x, a title
        (the fish's name / TANK, or NOT YET), the milestone's words */
     if (g_ms_caption[0] && g_ms_tip) {
@@ -4313,8 +5762,8 @@ int render_milestones_tap(const tank_t *t, float x, float y) {
     if (y >= MSP_CLOSE_Y - 4) return x >= MSP_CLOSE_X - 6 ? MS_TAP_CLOSE : MS_TAP_SHOP;
 #else
     if (x >= MSP_CLOSE_X - UI(8) && y >= MSP_CLOSE_Y - UI(4)) return MS_TAP_CLOSE;      /* slop out to the glass edge */
-    if (x < MSP_SET_X + MSP_SET_W + UI(8) && y >= MSP_CLOSE_Y - UI(4)) return MS_TAP_SETTINGS;   /* the settings page */
-    if (y >= MSP_CLOSE_Y - UI(4)) return MS_TAP_SHOP;                                            /* UPGRADES: the rest of the strip is the shop */
+    if (x < MSP_UPG_X + MSP_UPG_W + UI(8) && y >= MSP_CLOSE_Y - UI(4)) return MS_TAP_SHOP;       /* UPGRADES, bottom left: the shop */
+    if (y >= MSP_CLOSE_Y - UI(4)) return MS_TAP_SETTINGS;                                    /* SETTINGS: the rest of the strip (2026-10-24: the two swapped) */
 #endif
     int row = -1; bool tank_row = false, fry_row = false;
     fry_req_t req[FRY_REQ_MAX]; bool staged;
@@ -4444,7 +5893,20 @@ void render_notice(const tank_t *t, uint16_t *fb, int stride, int kind, int fish
     const char *caption2 = NULL;                              /* a second line: the title and both move up */
     const icon_t *ic = NULL;
     const fish_t *f = fish >= 0 && fish < t->n_fish ? &t->fish[fish] : NULL;
-    if (kind == 5) {                                          /* NOTICE_LIGHTS_OUT (2026-10-03): the first double-tap that turned the light off */
+    if (kind == 6) {                                          /* NOTICE_MODEL_DAMAGED (2026-10-21): the AI model is damaged */
+        snprintf(title, sizeof title, "AI MODEL DAMAGED");
+        snprintf(caption, sizeof caption, "REINSTALL AT POCKETANK.COM");
+        caption2 = "YOUR FISH ARE SAFE";
+        /* a warning triangle with an exclamation mark: the shape says it, not the hue */
+        const int TH = 34, PX = X + W / 2, PY = Y + 14;      /* apex at the top, base TH below */
+        for (int r = 0; r <= TH; r++) {
+            int half = r * 20 / TH;
+            rect_fill(&c, PX - half, PY + r, 2, 1, MSP_TEAL); rect_fill(&c, PX + half - 1, PY + r, 2, 1, MSP_TEAL);
+        }
+        rect_fill(&c, PX - 20, PY + TH - 1, 41, 2, MSP_TEAL);
+        rect_fill(&c, PX - 1, PY + 11, 3, 13, MSP_TEAL);      /* ! */
+        rect_fill(&c, PX - 1, PY + 27, 3, 3, MSP_TEAL);
+    } else if (kind == 5) {                                   /* NOTICE_LIGHTS_OUT (2026-10-03): the first double-tap that turned the light off */
         snprintf(title, sizeof title, "LIGHTS OUT");
         snprintf(caption, sizeof caption, "YOU DOUBLE-TAPPED THE GLASS");
         caption2 = "DOUBLE-TAP TO TURN IT ON";
@@ -4516,7 +5978,7 @@ static bool g_shp_sell_armed;        /* SELL tapped once: the next tap on it sel
 #else
 #define SHP_COIN_ART  (&icon_shop_sand_dollar_64)
 #endif
-static const icon_t *shop_icon(int item) { return item == 0 ? &icon_shop_plant : item == 1 ? &icon_shop_snail : item == 2 ? &icon_shop_castle : item == 3 ? &icon_shop_coral : item == 4 ? &icon_shop_cluster : item == 5 ? &icon_shop_shrimp : item == 6 ? &icon_shop_urchin : item == 7 ? &icon_shop_seahorse : &icon_shop_pumpkin; }
+static const icon_t *shop_icon(int item) { return item == 0 ? &icon_shop_plant : item == 1 ? &icon_shop_snail : item == 2 ? &icon_shop_castle : item == 3 ? &icon_shop_coral : item == 4 ? &icon_shop_cluster : item == 5 ? &icon_shop_shrimp : item == 6 ? &icon_shop_urchin : item == 7 ? &icon_shop_seahorse : item == 8 ? &icon_shop_pumpkin : item == 9 ? &icon_shop_volcano : &icon_shop_crab; }
 /* pages (2026-09-23, the fourth item): SHP_PER_PAGE rows fit between the
  * coin and the foot buttons once the filler caption went (HOW TO EARN says
  * the same). With more items than a page holds, arrows at the header's
@@ -4543,7 +6005,11 @@ static int g_shp_fry_pick;           /* the fry picked in its modal */
 static bool shp_fry(const tank_t *t) { return progression_fry_for_sale(t); }
 static int  shp_rows(const tank_t *t) { return SD_ITEM_COUNT + shp_fry(t) - !progression_pumpkin_offered(t); }   /* the pumpkin, the last item, only while this build sells it (or owned) */
 static int  shp_pages(const tank_t *t) { return (shp_rows(t) + SHP_PER_PAGE - 1) / SHP_PER_PAGE; }
-static int  shp_item(const tank_t *t, int row) { return shp_fry(t) ? row - 1 : row; }   /* -1 = the FRY row */
+static int  shp_item(const tank_t *t, int row) {                                       /* -1 = the FRY row; the pumpkin's row (8) is skipped while it is out of the shop */
+    int i = shp_fry(t) ? row - 1 : row;
+    if (i >= 8 && !progression_pumpkin_offered(t)) i++;
+    return i;
+}
 static void fry_hours(char *out, size_t n) {   /* "NEW FRY IN 14 H" / "IN 40 MIN" */
     float s = progression_fry_new_in_s();
     if (s >= 3600) snprintf(out, n, "NEW FRY IN %d H", (int)((s + 1799) / 3600));
@@ -4612,7 +6078,107 @@ static void shop_fry_modal(ctx_t *c, const tank_t *t, uint16_t *fb, int stride) 
               draw_text(c, bx + (MSP_HOW_W - text_w("BUY", UI_TEXT(2))) / 2, by + (MSP_HOW_H - 7 * UI_TEXT(2)) / 2, UI_TEXT(2), MSP_INK, "BUY"); }
     else button(c, bx, by, MSP_HOW_W, MSP_HOW_H, 0x1c2f36, MSP_DIM, "BUY", UI_TEXT(2));
 }
+/* the shelf's words (0.3.9): the line under IN THE TANK / ON THE SHELF in a
+ * placeable piece's modal - a living piece on the shelf says how far it has
+ * grown (it keeps growing there), the pumpkin says when this build no longer
+ * sells it (so a SELL is an informed one). NULL = nothing to say. */
+static const char *shelf_line(const tank_t *t, int item, char *out, size_t n) {
+    bool shelved = (t->sd_shelved & SD_ITEMS[item].bit) != 0;
+    if (item == 8 && !SD_PUMPKIN_IN_SHOP) return "NOT IN THE SHOP NOW";
+    if (!shelved) return tank_decor_locked(t, item) ? "LOCKED IN PLACE" : NULL;   /* (0.3.9: why a hold on it opens nothing; MOVE is the way to its page) */
+    if (item == 3) { snprintf(out, n, "GROWING  %d%%", (int)(tank_coral_growth(t) * 100 / CORAL_FULL + 0.5f)); return out; }
+    if (item == 4) { snprintf(out, n, "GROWING  %d%%", (int)(tank_cluster_growth(t) * 100 / CLUSTER_FULL + 0.5f)); return out; }
+    if (item == 0) return "GROWING";
+    return NULL;
+}
+/* the shelf's little tanks (0.3.9, Strato: "represented inside a small
+ * dedicated tank for each living decoration that is shelved"). A living piece
+ * on the shelf (the plant, the coral, the cluster) is painted AS IT IS - its
+ * color, its look, its growth - by its own painter at full size into a square
+ * window of tank coordinates whose scratch is the frame itself (the page
+ * paints over it a moment later: no buffer of its own), then box-filtered 3:1
+ * into a 32 x 32 thumb (the icon's size) in the decor scratch (PSRAM;
+ * internal RAM is spoken for); the window is 72..256 px a side, as tight as
+ * the piece. The row shows it as is, the modal doubled (as the icons are). Rebuilt only when its key changes (growth to the percent, color /
+ * look, the shop reopened), never per frame. The thumb stands in the row's
+ * icon slot and, doubled, in the modal; the castle and the pumpkin, which do
+ * not live, sit as their icon on a shelf board. */
+#ifdef CONFIG_POCKET_TANK_320X240
+#define SHELF_FULL  TANK_H                                             /* (this fork) the 240 px frame is the window's scratch: 256 rows would run past its end */
+#else
+#define SHELF_FULL  256                                                /* the widest window: a sword plant at its ceiling (the frame is wider on every glass) */
+#endif
+#define SHELF_THUMB 32                                                 /* the shop icon's size: the row's slot (Strato 10-19: the 64 px one ran into the next row) */
+#define SHELF_WATER 0x0c2e3e
+#define SHELF_SAND  0x8c7a4e
+static int g_shelf_key[3];                                             /* the plant, the coral, the cluster: 0 = no thumb */
+static int shelf_idx(int item) { return item == 0 ? 0 : item == 3 ? 1 : item == 4 ? 2 : -1; }
+static int shelf_pct(const tank_t *t, int item) {
+    return item == 3 ? (int)(tank_coral_growth(t) * 100 / CORAL_FULL + 0.5f) : item == 4 ? (int)(tank_cluster_growth(t) * 100 / CLUSTER_FULL + 0.5f) : (int)(t->veg_growth[3] * 100 + 0.5f);
+}
+static int shelf_key(const tank_t *t, int item) {
+    uint32_t look = item == 3 ? tank_coral_rgb(t) : item == 4 ? (uint32_t)tank_cluster_scheme(t) : 0;
+    return (int)((((look * 2654435761u) >> 12) & 0x7fff00u) + (uint32_t)shelf_pct(t, item) + 1u);
+}
+/* the window: square, as tight as the piece - its top 10 px over the piece's
+ * highest pixel (the bloom and the crown included), 4 px of sand under the
+ * floor, at least as wide as the piece and its mound, 72..192 px a side */
+static int shelf_window(const tank_t *t, int item, int *top) {
+    float ptop; int hw;
+    if (item == 0)      { tank_veg_bed(t, 3, NULL, NULL, &ptop, NULL); hw = PLANT_HALF_W + 14; }
+    else if (item == 3) { ptop = TANK_BOT - 14 + DECOR_SINK - 92 - (tank_coral_growth(t) > 1 ? 18 : 0); hw = CORAL_HALF_W + 10; }
+    else                { ptop = TANK_BOT - 14 + DECOR_SINK - 120 - (tank_cluster_growth(t) > 1 ? 26 : 0); hw = CLUSTER_HALF_W + 10; }
+    int s = TANK_BOT + 4 - ((int)ptop - 10);
+    if (s < 2 * hw) s = 2 * hw;
+    if (s < 72) s = 72;
+    if (s > SHELF_FULL) s = SHELF_FULL;
+    *top = TANK_BOT + 4 - s;
+    return s;
+}
+static void shelf_build(const tank_t *t, int item, uint16_t *fb, int stride) {
+    int k = shelf_idx(item), key = shelf_key(t, item);
+    if (k < 0 || g_shelf_key[k] == key) return;
+    g_shelf_key[k] = key;
+    int cx = (int)tank_decor_x(t, item), top, side = shelf_window(t, item, &top);
+    ctx_t c = { fb, stride, 1.0f, cx - side / 2, top, side, side };   /* the window lands at the frame's top left */
+    rect_fill(&c, c.ox, c.oy, side, side, SHELF_WATER);
+    rect_fill(&c, c.ox, TANK_BOT - 16, side, c.oy + side - (TANK_BOT - 16), SHELF_SAND);
+    int bx0, by0, bx1, by1;
+    if (item == 3)      { draw_coral(&c, cx, tank_coral_rgb(t), tank_coral_growth(t), false);
+                          draw_coral_crown(&c, cx, tank_coral_rgb(t), tank_coral_growth(t), 0, &bx0, &by0, &bx1, &by1); }
+    else if (item == 4) { draw_cluster(&c, cx, tank_cluster_scheme(t), tank_cluster_growth(t), false);
+                          draw_cluster_crown(&c, cx, tank_cluster_scheme(t), tank_cluster_growth(t), 0, &bx0, &by0, &bx1, &by1); }
+    else                  draw_veg(&c, t, 3, VEG_SEED[3], -1, false);
+    uint16_t *th = ds()->shelf_thumb[k];                             /* the box filter: each thumb pixel averages its share of the window */
+    for (int y = 0; y < SHELF_THUMB; y++) {
+        int sy0 = y * side / SHELF_THUMB, sy1 = (y + 1) * side / SHELF_THUMB; if (sy1 <= sy0) sy1 = sy0 + 1;
+        for (int x = 0; x < SHELF_THUMB; x++) {
+            int sx0 = x * side / SHELF_THUMB, sx1 = (x + 1) * side / SHELF_THUMB; if (sx1 <= sx0) sx1 = sx0 + 1;
+            int r = 0, g = 0, b = 0, n = (sy1 - sy0) * (sx1 - sx0);
+            for (int sy = sy0; sy < sy1; sy++) for (int sx = sx0; sx < sx1; sx++) { uint16_t v = FB_SWAP16(fb[sy * stride + sx]); r += v >> 11; g += (v >> 5) & 63; b += v & 31; }
+            th[y * SHELF_THUMB + x] = (uint16_t)(((r / n) << 11) | ((g / n) << 5) | (b / n));
+        }
+    }
+}
+static void shelf_prepare(const tank_t *t, uint16_t *fb, int stride) {   /* before the page paints: every shelved living piece has its thumb */
+    static const int living[3] = { 0, 3, 4 };
+    for (int i = 0; i < 3; i++) if (t->sd_shelved & SD_ITEMS[living[i]].bit) shelf_build(t, living[i], fb, stride);
+}
+static void shelf_slot(ctx_t *c, int x, int y, const tank_t *t, int item, int s) {   /* the icon slot: s = 1 on the row (32 px), 2 in the modal (64, as the icons) */
+    const int W = SHELF_THUMB * s, H = SHELF_THUMB * s; int k = shelf_idx(item);
+    if (k >= 0 && g_shelf_key[k]) {                                   /* the little tank: the thumb, the glass, a glint */
+        const uint16_t *th = ds()->shelf_thumb[k];
+        for (int yy = 0; yy < H; yy++) for (int xx = 0; xx < W; xx++) if (CTX_IN(c, x + xx, y + yy)) CTX_PX(c, x + xx, y + yy) = FB_SWAP16(th[(yy / s) * SHELF_THUMB + xx / s]);
+        rect_edge(c, x, y, W, H, MSP_TEAL);
+        for (int i = 1; i < 3 * s; i++) px_blend(c, x + 2 * s + i, y + 2 * s, 0xffffff, 110);
+        return;
+    }
+    rect_fill(c, x, y + H - 3 * s, W, 3 * s, 0x5a3c22);                /* the shelf board under a piece that does not live */
+    rect_fill(c, x, y + H - 3 * s, W, 1, 0x8a6a42);
+    if (s == 1) blit_icon(c, x, y, shop_icon(item), 255); else blit_icon_scaled(c, x, y, shop_icon(item), s, true);
+}
 void render_shop(const tank_t *t, uint16_t *fb, int stride) {
+    shelf_prepare(t, fb, stride);                             /* (the shelf's thumbs first: the frame is their scratch) */
     ctx_t c = ctx_page(fb, stride);
     rect_fill(&c, -PAGE_X, -PAGE_Y, TANK_W, TANK_H, MSP_INK);
     blit_icon(&c, SHP_COIN_X, SHP_COIN_Y, SHP_COIN_ART, 255);
@@ -4628,13 +6194,17 @@ void render_shop(const tank_t *t, uint16_t *fb, int stride) {
         int top = SHP_ROW_Y0 + (r - g_shp_page * SHP_PER_PAGE) * SHP_ROW_DY, i = shp_item(t, r);
         if (i < 0) { shop_fry_row(&c, t, fb, stride, top); continue; }
         const sd_item_t *it = &SD_ITEMS[i];
-        bool owned = (t->sd_unlocks & it->bit) != 0, can = t->sd_balance >= it->price;
-        if (owned) blit_icon(&c, SHP_ROW_X, top, shop_icon(i), 255); else blit_icon_locked(&c, SHP_ROW_X, top, shop_icon(i));   /* (the rows are where the bowl is wide: their own column) */
+        bool owned = (t->sd_unlocks & it->bit) != 0, can = t->sd_balance >= it->price, shelved = owned && (t->sd_shelved & it->bit);
+        if (shelved) shelf_slot(&c, SHP_ROW_X, top, t, i, 1);                                                             /* the shelf (0.3.9): the piece as it is, in its little tank */
+        else if (owned) blit_icon(&c, SHP_ROW_X, top, shop_icon(i), 255); else blit_icon_locked(&c, SHP_ROW_X, top, shop_icon(i));   /* (the rows are where the bowl is wide: their own column) */
         const int by = top + SHP_BTN_DY;
         draw_text(&c, SHP_TEXT_X, top + UI(2), UI_TEXT(2), 0xffffff, it->name);
-        if (owned) draw_text(&c, SHP_TEXT_X, top + UI(20), UI_TEXT(2), MSP_TEAL, "IN THE TANK");
+        if (shelved) draw_text(&c, SHP_TEXT_X, top + UI(20), UI_TEXT(2), MSP_TEAL, "ON THE SHELF");
+        else if (owned) draw_text(&c, SHP_TEXT_X, top + UI(20), UI_TEXT(2), MSP_TEAL, "IN THE TANK");
         else price_tag(&c, SHP_TEXT_X, top + UI(20), it->price, can ? MSP_TEAL : MSP_DIM);
-        if (owned)     button(&c, SHP_BTN_X, by, SHP_BTN_W, SHP_BTN_H, MSP_INK, MSP_DIM, "IN TANK", UI_TEXT(2));
+        if (shelved) { button(&c, SHP_BTN_X, by, SHP_BTN_W, SHP_BTN_H, MSP_TEAL, MSP_TEAL, "PUT BACK", UI_TEXT(2));          /* live: one tap returns it */
+                       draw_text(&c, SHP_BTN_X + (SHP_BTN_W - text_w("PUT BACK", UI_TEXT(2))) / 2, by + (SHP_BTN_H - 7 * UI_TEXT(2)) / 2, UI_TEXT(2), MSP_INK, "PUT BACK"); }
+        else if (owned) button(&c, SHP_BTN_X, by, SHP_BTN_W, SHP_BTN_H, MSP_INK, MSP_DIM, "IN TANK", UI_TEXT(2));
         else if (can) { button(&c, SHP_BTN_X, by, SHP_BTN_W, SHP_BTN_H, MSP_TEAL, MSP_TEAL, "UNLOCK", UI_TEXT(2));
                         draw_text(&c, SHP_BTN_X + (SHP_BTN_W - text_w("UNLOCK", UI_TEXT(2))) / 2, by + (SHP_BTN_H - 7 * UI_TEXT(2)) / 2, UI_TEXT(2), MSP_INK, "UNLOCK"); }
         else           button(&c, SHP_BTN_X, by, SHP_BTN_W, SHP_BTN_H, 0x1c2f36, MSP_DIM, "UNLOCK", UI_TEXT(2));
@@ -4643,7 +6213,7 @@ void render_shop(const tank_t *t, uint16_t *fb, int stride) {
     button(&c, SHP_CLOSE_X, MSP_CLOSE_Y, MSP_CLOSE_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "CLOSE", UI_TEXT(2));
     if (g_shp_modal < 0 && !g_shp_earn) return;
     for (int y = 0; y < TANK_H; y++)                          /* the page out of reach under a modal */
-        for (int x = 0; x < TANK_W; x++) fb[y * stride + x] = (uint16_t)((fb[y * stride + x] >> 1) & 0x7bef);
+        for (int x = 0; x < TANK_W; x++) { uint16_t n = FB_SWAP16(fb[y * stride + x]); fb[y * stride + x] = FB_SWAP16((uint16_t)((n >> 1) & 0x7bef)); }
     const int X = SHP_MODAL_X, W = SHP_MODAL_W;
     if (g_shp_earn) {
         const int Y = SHP_EARN_MODAL_Y, H = SHP_EARN_MODAL_H;
@@ -4662,19 +6232,23 @@ void render_shop(const tank_t *t, uint16_t *fb, int stride) {
     rect_fill(&c, X, Y, W, H, 0x04141a);
     rect_edge(&c, X, Y, W, H, MSP_TEAL); rect_edge(&c, X + 1, Y + 1, W - 2, H - 2, 0x1c2f36);
     const icon_t *art = shop_icon(g_shp_modal);
-    blit_icon_scaled(&c, X + (W - art->w * UI_TEXT(2)) / 2, Y + UI(14), art, UI_TEXT(2), true);
+    const int ax = X + (W - art->w * UI_TEXT(2)) / 2, ay = Y + UI(14);   /* (this fork) the art at the page's text scale: 1x on the CYD */
+    blit_icon_scaled(&c, ax, ay, art, UI_TEXT(2), true);
     draw_text(&c, X + (W - text_w(it->name, UI_TEXT(3))) / 2, Y + UI(88), UI_TEXT(3), 0xffffff, it->name);
     draw_text(&c, X + (W - text_w(it->words, UI_TEXT(2))) / 2, Y + UI(118), UI_TEXT(2), MSP_TEAL, it->words);
     draw_text(&c, X + (W - text_w(it->words2, UI_TEXT(2))) / 2, Y + UI(138), UI_TEXT(2), MSP_TEAL, it->words2);
     const int bx = X + (W - MSP_HOW_W) / 2, by = Y + H - UI(12) - MSP_HOW_H;
-    if (owned && tank_decor_placeable(g_shp_modal)) {         /* a placeable piece: MOVE re-opens the placement page, SELL (twice) sells it back */
-        char sell[24]; snprintf(sell, sizeof sell, "SELLS BACK FOR %d", progression_sell_value(g_shp_modal));
-        draw_text(&c, X + (W - text_w("IN THE TANK", UI_TEXT(2))) / 2, Y + UI(164), UI_TEXT(2), MSP_TEAL, "IN THE TANK");
-        draw_text(&c, X + (W - text_w(sell, UI_TEXT(2))) / 2, Y + UI(184), UI_TEXT(2), MSP_DIM, sell);
-        button(&c, SHP_TWO_X0, by, MSP_HOW_W, MSP_HOW_H, 0x1c2f36, MSP_TEAL, "MOVE", UI_TEXT(2));
-        if (g_shp_sell_armed) { snprintf(sell, sizeof sell, "+%d OK?", progression_sell_value(g_shp_modal));
-                                button(&c, SHP_TWO_X1, by, MSP_HOW_W, MSP_HOW_H, MSP_TEAL, MSP_TEAL, sell, UI_TEXT(2));
-                                draw_text(&c, SHP_TWO_X1 + (MSP_HOW_W - text_w(sell, UI_TEXT(2))) / 2, by + (MSP_HOW_H - 7 * UI_TEXT(2)) / 2, UI_TEXT(2), MSP_INK, sell); }
+    if (owned && tank_decor_placeable(g_shp_modal)) {         /* a placeable piece (0.3.9): in the tank MOVE | SHELVE; on the shelf PLACE | SELL (twice) */
+        bool shelved = (t->sd_shelved & it->bit) != 0; char sub[28];
+        if (shelved) shelf_slot(&c, ax, ay, t, g_shp_modal, UI_TEXT(2));   /* over the icon: the piece as it is on the shelf */
+        const char *state = shelved ? "ON THE SHELF" : "IN THE TANK";
+        draw_text(&c, X + (W - text_w(state, UI_TEXT(2))) / 2, Y + UI(164), UI_TEXT(2), MSP_TEAL, state);
+        if (shelf_line(t, g_shp_modal, sub, sizeof sub)) draw_text(&c, X + (W - text_w(sub, UI_TEXT(2))) / 2, Y + UI(184), UI_TEXT(2), MSP_DIM, sub);
+        button(&c, SHP_TWO_X0, by, MSP_HOW_W, MSP_HOW_H, 0x1c2f36, MSP_TEAL, shelved ? "PLACE" : "MOVE", UI_TEXT(2));
+        if (!shelved) button(&c, SHP_TWO_X1, by, MSP_HOW_W, MSP_HOW_H, 0x1c2f36, MSP_TEAL, "SHELVE", UI_TEXT(2));
+        else if (g_shp_sell_armed) { snprintf(sub, sizeof sub, "+%d OK?", progression_sell_value(g_shp_modal));
+                                     button(&c, SHP_TWO_X1, by, MSP_HOW_W, MSP_HOW_H, MSP_TEAL, MSP_TEAL, sub, UI_TEXT(2));
+                                     draw_text(&c, SHP_TWO_X1 + (MSP_HOW_W - text_w(sub, UI_TEXT(2))) / 2, by + (MSP_HOW_H - 7 * UI_TEXT(2)) / 2, UI_TEXT(2), MSP_INK, sub); }
         else button(&c, SHP_TWO_X1, by, MSP_HOW_W, MSP_HOW_H, 0x1c2f36, MSP_DIM, "SELL", UI_TEXT(2));
     } else if (owned) draw_text(&c, X + (W - text_w("IN THE TANK", UI_TEXT(2))) / 2, by + UI(8), UI_TEXT(2), MSP_TEAL, "IN THE TANK");   /* the snail: a permanent resident */
     else {
@@ -4712,13 +6286,14 @@ int render_shop_tap(const tank_t *t, float x, float y) {
         const int bx = SHP_MODAL_X + (SHP_MODAL_W - MSP_HOW_W) / 2, by = SHP_MODAL_Y + SHP_MODAL_H - UI(12) - MSP_HOW_H;
         bool row = y >= by - MSP_HOW_SLOP_UP && y < by + MSP_HOW_H + MSP_HOW_SLOP_DN;
         bool on_btn = row && x >= bx - MSP_HOW_SLOP_X && x < bx + MSP_HOW_W + MSP_HOW_SLOP_X;
-        if (owned && tank_decor_placeable(item)) {                /* two buttons: MOVE, and SELL armed then confirmed */
-            bool on_move = row && x >= SHP_TWO_X0 - MSP_HOW_SLOP_X && x < SHP_TWO_X0 + MSP_HOW_W + SHP_TWO_GAP / 2;
-            bool on_sell = row && x >= SHP_TWO_X1 - SHP_TWO_GAP / 2 && x < SHP_TWO_X1 + MSP_HOW_W + MSP_HOW_SLOP_X;
-            if (on_sell && !g_shp_sell_armed) { g_shp_sell_armed = true; return SHOP_TAP_KEPT; }
+        if (owned && tank_decor_placeable(item)) {                /* two buttons: in the tank MOVE | SHELVE; on the shelf PLACE | SELL (armed, then confirmed) */
+            bool shelved = (t->sd_shelved & it->bit) != 0;
+            bool on_left  = row && x >= SHP_TWO_X0 - MSP_HOW_SLOP_X && x < SHP_TWO_X0 + MSP_HOW_W + SHP_TWO_GAP / 2;
+            bool on_right = row && x >= SHP_TWO_X1 - SHP_TWO_GAP / 2 && x < SHP_TWO_X1 + MSP_HOW_W + MSP_HOW_SLOP_X;
+            if (shelved && on_right && !g_shp_sell_armed) { g_shp_sell_armed = true; return SHOP_TAP_KEPT; }
             g_shp_sell_armed = false; g_shp_modal = -1;
-            if (on_sell) return SHOP_TAP_SELL + item;
-            if (on_move) return SHOP_TAP_MOVE + item;
+            if (on_right) return (shelved ? SHOP_TAP_SELL : SHOP_TAP_SHELVE) + item;
+            if (on_left)  return (shelved ? SHOP_TAP_PLACE : SHOP_TAP_MOVE) + item;
             return SHOP_TAP_KEPT;
         }
         g_shp_modal = -1; g_shp_sell_armed = false;
@@ -4735,6 +6310,7 @@ int render_shop_tap(const tank_t *t, float x, float y) {
     for (int r = g_shp_page * SHP_PER_PAGE; r < shp_rows(t) && r < (g_shp_page + 1) * SHP_PER_PAGE; r++) {
         int top = SHP_ROW_Y0 + (r - g_shp_page * SHP_PER_PAGE) * SHP_ROW_DY, i = shp_item(t, r);
         if (x >= MSP_HIT_X0 && y >= top - UI(8) && y < top + SHP_ROW_DY - UI(8)) {
+            if (i >= 0 && (t->sd_shelved & SD_ITEMS[i].bit) && x >= SHP_BTN_X - UI(8)) return SHOP_TAP_PLACE + i;   /* the row's PUT BACK (0.3.9) */
             if (i < 0) { int k = fry_first_left(); g_shp_fry_pick = k < 0 ? 0 : k; g_shp_modal = SHP_MODAL_FRY; }   /* the fry's modal, the first one left picked */
             else g_shp_modal = i;
             return SHOP_TAP_KEPT;
@@ -4742,7 +6318,7 @@ int render_shop_tap(const tank_t *t, float x, float y) {
     }
     return SHOP_TAP_NONE;
 }
-void render_shop_leave(void) { g_shp_modal = -1; g_shp_earn = false; g_shp_page = 0; g_shp_sell_armed = false; }
+void render_shop_leave(void) { g_shp_modal = -1; g_shp_earn = false; g_shp_page = 0; g_shp_sell_armed = false; g_shelf_key[0] = g_shelf_key[1] = g_shelf_key[2] = 0; }
 
 /* the toast: "+N" by a coin, top centre, for TOAST_S on the tank clock */
 #define TOAST_S 2.5f
@@ -4773,10 +6349,11 @@ void render_sd_toast(const tank_t *t, uint16_t *fb, int stride) {
  * room there anyway". Rows of segment buttons, generous hit bands (fingers
  * land low near the bezel, as on the milestones page). 0.3.2: LIGHTS OUT is
  * one row (a value between two arrows, where MANUAL / AUTO and a big seconds
- * selector stood), and AUTO FEED and ROTATION have the room it gave back. */
+ * selector stood), and AUTO FEED and ROTATION have the room it gave back.
+ * 0.3.9: BRIGHTNESS is a slider (30 / 60 / 100 % was too coarse at the dim
+ * end - Bananna on Discord, light sensitive: "even the 30% brightness can be
+ * a bit bright"). */
 /* (the page's numbers, SET_*: render.h) */
-static const char *const SET_BRIGHT[3] = { "30%", "60%", "100%" };
-static const int         SET_BRIGHT_PCT[3] = { 30, 60, 100 };
 static const char *const SET_VOLUME[3] = { "OFF", "QUIET", "NORMAL" };
 static const char *const SET_LIGHT[LIGHT_IDLE_N + 1] = { "DOUBLE-TAP",   /* MANUAL, the default: the row says how the light is worked */
     "5 SEC", "15 SEC", "30 SEC", "1 MIN", "3 MIN", "5 MIN", "10 MIN", "30 MIN" };
@@ -4807,6 +6384,26 @@ static void set_row(ctx_t *c, int row_y, const char *label, const char *const na
             draw_text(c, x + (SET_SEG_W - text_w(names[i], UI_TEXT(2))) / 2, y + (SET_SEG_H - 7 * UI_TEXT(2)) / 2, UI_TEXT(2), MSP_INK, names[i]);
         } else button(c, x, y, SET_SEG_W, SET_SEG_H, 0x1c2f36, MSP_DIM, names[i], UI_TEXT(2));
     }
+}
+/* the percent a finger at page x asks of the BRIGHTNESS slider: the nearest step */
+static int set_bright_at(float x) {
+    float f = (x - SET_BRT_X0) / (float)(SET_BRT_X1 - SET_BRT_X0);
+    int pct = SET_BRT_MIN + (int)lroundf(f * (100 - SET_BRT_MIN) / SET_BRT_STEP) * SET_BRT_STEP;
+    return pct < SET_BRT_MIN ? SET_BRT_MIN : pct > 100 ? 100 : pct;
+}
+/* the slider: the rail lit (teal) up to the knob and dim past it - the lit
+ * part is the brighter one, so it reads without the hue - and the knob, a
+ * lit button with the percent on it in ink */
+static void set_slider(ctx_t *c, int row_y, int pct) {
+    int y = SET_SEG_Y(row_y), cy = y + SET_SEG_H / 2;
+    int kx = SET_BRT_X(pct < SET_BRT_MIN ? SET_BRT_MIN : pct > 100 ? 100 : pct);
+    draw_text(c, SET_LABEL_X, row_y, UI_TEXT(2), MSP_TEAL, "BRIGHTNESS");
+    rect_fill(c, SET_SEG_X + UI(4), cy - UI(3), kx - SET_SEG_X - UI(4), UI(6), MSP_TEAL);
+    rect_fill(c, kx, cy - UI(3), SET_SEG_X + SET_SPAN_W - UI(4) - kx, UI(6), 0x1c2f36);
+    rect_edge(c, kx, cy - UI(3), SET_SEG_X + SET_SPAN_W - UI(4) - kx, UI(6), MSP_DIM);
+    char txt[8]; snprintf(txt, sizeof txt, "%d%%", pct);
+    button(c, kx - SET_KNOB_W / 2, y, SET_KNOB_W, SET_SEG_H, MSP_TEAL, MSP_TEAL, "", UI_TEXT(2));
+    draw_text(c, kx - text_w(txt, UI_TEXT(2)) / 2, y + (SET_SEG_H - 7 * UI_TEXT(2)) / 2, UI_TEXT(2), MSP_INK, txt);
 }
 /* an arrow button of the LIGHTS OUT row: dim at the end of the list */
 static void set_arrow(ctx_t *c, int x, int y, bool right, bool live) {
@@ -4864,8 +6461,7 @@ void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, 
     ctx_t c = ctx_page(fb, stride);
     rect_fill(&c, -PAGE_X, -PAGE_Y, TANK_W, TANK_H, MSP_INK);
     draw_text(&c, (PAGE_W - text_w("SETTINGS", UI_TEXT(3))) / 2, SET_TITLE_Y, UI_TEXT(3), 0xffffff, "SETTINGS");
-    int bi = bright_pct <= 30 ? 0 : bright_pct <= 60 ? 1 : 2;
-    set_row(&c, SET_ROW1_Y, "BRIGHTNESS", SET_BRIGHT, 3, bi);
+    set_slider(&c, SET_ROW1_Y, bright_pct);
     set_row(&c, SET_ROW2_Y, "VOLUME", SET_VOLUME, 3, volume < 0 ? 0 : volume > 2 ? 2 : volume);
     draw_text(&c, SET_LABEL_X, SET_NOTE_Y, UI_TEXT(2), MSP_DIM, "FISH ARE QUIET AT NIGHT");
     /* LIGHTS OUT: < the choice > */
@@ -4940,7 +6536,8 @@ static int set_segment(float x, int n) {
     int i = (int)((x - SET_SEG_X + UI(3)) / SET_SEG_DX);
     return i < 0 ? 0 : i >= n ? n - 1 : i;
 }
-/* the hit test: what a TAP at (x,y) means. *value: BRIGHT the percent,
+/* the hit test: what a TAP at (x,y) means. *value: BRIGHT the percent the
+ * slider's step nearest x,
  * VOLUME 0..2, FEED 1 = ON, SCREEN 1 = TURNED; ROTATE carries none (a
  * toggle); the LIGHTS OUT row's own hits are LIGHT_PREV / LIGHT_NEXT (its
  * left and right halves). */
@@ -4954,7 +6551,7 @@ int render_settings_tap(float x, float y, int *value) {
     /* the row bands: from a little above each segment down to the next row
        (fingers report low); the last one stops at the foot's */
     int seg = set_segment(x, 3), two = set_segment(x, 2);
-    if (y >= SET_SEG_Y(SET_ROW1_Y) - UI(12) && y < SET_SEG_Y(SET_ROW2_Y) - UI(12)) { if (seg < 0) return SET_TAP_NONE; *value = SET_BRIGHT_PCT[seg]; return SET_TAP_BRIGHT; }
+    if (y >= SET_SEG_Y(SET_ROW1_Y) - UI(12) && y < SET_SEG_Y(SET_ROW2_Y) - UI(12)) { if (seg < 0) return SET_TAP_NONE; *value = set_bright_at(x); return SET_TAP_BRIGHT; }
     if (y >= SET_SEG_Y(SET_ROW2_Y) - UI(12) && y < SET_SEG_Y(SET_ROW3_Y) - UI(12)) { if (seg < 0) return SET_TAP_NONE; *value = seg; return SET_TAP_VOLUME; }
     if (y >= SET_SEG_Y(SET_ROW3_Y) - UI(12) && y < SET_SEG_Y(SET_ROW4_Y) - UI(12)) { if (seg < 0) return SET_TAP_NONE; *value = 0; return x < SET_SPAN_MID ? SET_HIT_LIGHT_PREV : SET_HIT_LIGHT_NEXT; }
     if (y >= SET_SEG_Y(SET_ROW4_Y) - UI(12) && y < SET_SEG_Y(SET_ROW5_Y) - UI(12)) { if (two < 0) return SET_TAP_NONE; *value = two == 0; return SET_TAP_FEED; }
@@ -4987,6 +6584,12 @@ int render_settings_touch(tank_t *t, float x, float y, bool down, int *value) {
     if (down && !s_down) {                                  /* press */
         s_px = x; s_py = y;
         s_hit = render_settings_tap(x, y, &s_hv);
+        if (s_hit == SET_TAP_BRIGHT) { r = SET_TAP_BRIGHT_LIVE; *value = s_hv; }   /* the slider: the knob jumps to the finger */
+    } else if (down && s_hit == SET_TAP_BRIGHT) {          /* the slider under a finger: the knob follows it along the row, */
+        int v = set_bright_at(x - PAGE_X);                  /* however far up or down the finger wanders */
+        if (v != s_hv) { s_hv = v; r = SET_TAP_BRIGHT_LIVE; *value = v; }
+    } else if (!down && s_down && s_hit == SET_TAP_BRIGHT) {   /* let go: the last step it showed is the setting */
+        r = SET_TAP_BRIGHT; *value = s_hv;
     } else if (!down && s_down) {                           /* release: a tap, if it stayed on what it pressed */
         int v = 0, h = render_settings_tap(x, y, &v);
         float dx = x - s_px, dy = y - s_py;
@@ -5007,7 +6610,7 @@ int render_settings_touch(tank_t *t, float x, float y, bool down, int *value) {
             } else if (h == SET_TAP_SCREEN) {                  /* the way up: NORMAL (0, the default) / TURNED (1) */
                 if ((v != 0) != t->screen_turned) { tank_screen_set(t, v != 0); progression_settings_changed(); }
                 r = SET_TAP_SCREEN; *value = v;
-            } else if (h == SET_TAP_CLOSE || h == SET_TAP_BRIGHT || h == SET_TAP_VOLUME || h == SET_TAP_UPDATES
+            } else if (h == SET_TAP_CLOSE || h == SET_TAP_VOLUME || h == SET_TAP_UPDATES
                        || h == SET_TAP_FLIP || h == SET_TAP_SLEEP) { r = h; *value = v; }   /* FLIP, SLEEP: the 320x240 boards', the platform's to apply */
         }
     }

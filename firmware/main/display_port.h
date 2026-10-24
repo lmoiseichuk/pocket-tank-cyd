@@ -11,6 +11,13 @@ bool display_port_init(void);
 /* push a full TANK_W x TANK_H RGB565 frame; may return before DMA completes */
 void display_port_flush(const uint16_t *fb);
 void display_port_flush_prof(int64_t *wait_us, int64_t *send_us);   /* since the last call: waiting on the wire, inside the send */
+/* the asynchronous flush (2026-10-23): the frame leaves on a flush task (the stripes copied out of PSRAM by GDMA, swapped in
+ * internal RAM, sent by the SPI DMA) while the next frame renders. flush_async hands a frame over (false: not available, or a
+ * clear is owed - flush it the plain way); `done` is called on the flush task once the frame has left. flush_wait blocks until
+ * no flush of fb (NULL: of any frame) is in flight - before a buffer is written again. */
+bool display_port_flush_async(const uint16_t *fb, void (*done)(const uint16_t *fb, void *arg), void *arg);
+void display_port_flush_wait(const uint16_t *fb);
+void display_port_flush_async_prof(int64_t *task_us, int *frames, int64_t *copy_us);   /* since the last call: the task's time, its frames, waiting on the copies */
 /* power the panel down for device sleep; display_port_wake (or a boot's
  * display_port_init) re-sequences it */
 void display_port_sleep(void);

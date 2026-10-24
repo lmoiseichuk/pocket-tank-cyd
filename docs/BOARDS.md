@@ -57,7 +57,22 @@ pixel instead of a name - fix that instead.
    test for one board.
 4. **A save field only ever appends** (progression.c's SAVE LAYOUT LOCK), and
    the save means the same on every board.
-5. **Nothing is done until all four say so:**
+5. **Every board's SIZE, not just its layout (Strato, 2026-10-18: "always
+   consider the different board screen dimensions when adding or adjusting
+   features").** The glasses differ in depth and width - the 1.8 is 448 x 368,
+   the bowl's floor is at 396 under a curved top, the square is 480 x 480, the
+   watch 410 x 502, the P4 (its branch) 1280 x 800. Anything that pairs a
+   distance with a time, a speed or a count - a lifetime, a fall, a swim, a
+   reach, a spacing, a density, a timeout - tuned on the 1.8 is a 1.8 number.
+   Derive it from the world's names (`TANK_BOT`, `FOOD_FLOOR_Y`, `TANK_FX0` /
+   `TANK_FX1`, `TANK_W` / `TANK_H`) or prove it with a selftest that MEASURES
+   it on every world (check-all runs it four times). Before adding or
+   changing one, ask: does it still hold on the tallest glass (the watch), the
+   widest (the P4), the curved one (the bowl)? The miss that wrote this rule:
+   a pellet left in the water vanished at 45 s - the 1.8's fall - so on the
+   watch, the square and the bowl it dissolved mid-water before the shrimp
+   could reach it, for weeks (fixed in 0.3.8: `FOOD_LIFE_S` from the depth).
+6. **Nothing is done until all four say so:**
 
    | step | command (from the project root) | what it proves |
    |---|---|---|
@@ -69,6 +84,25 @@ pixel instead of a name - fix that instead.
    The handoff entry for a feature says where each board stands: checked /
    pictured / built / flashed / tried on the glass. "Not flashed" is a fine
    state; "unknown" is not.
+
+6. **The render stack (2026-10-24).** Anything new that stands on the sand
+   or is placed in the tank - a critter, a decoration, a lane, a hiding
+   place - gets its row in docs/render-stack.md FIRST, and `fishsim
+   --selftest-stack` (the matrix that derives its checks from that table)
+   must pass in four worlds before the thing is called done. Strato, after a
+   day of catching the crab's layering by eye: "this will not be the last
+   time this comes up as we add new decorations features and critters".
+
+7. **Linux before a tag (2026-10-24).** The gate above runs on this Mac;
+   CI runs it on Linux (gcc, glibc), and a selftest whose margin sits
+   exactly where the two libraries round differently passes here and fails
+   there. v0.3.9's public commit failed `checks` on two such margins (the
+   tend hold's slower fish at 30 px = HOLD_APPROACH_AT; the seahorse's
+   look from the sand over inside the second the test sampled at). So
+   before a release tag: `pocket-tank/tools/check_linux.sh` (the same
+   check-all in an ubuntu:26.04 container; `--all` lists every failure in
+   one run). A test that fails on Linux alone is a test with a margin:
+   test the claim, not the margin.
 
 ## Releases
 

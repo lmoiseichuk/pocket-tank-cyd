@@ -178,12 +178,16 @@ const char *const *progression_fry_tip(int kind);
  * in tank_t (sd_paid_fish, sd_colonies_paid, sd_inches_paid) keeps a save
  * from paying twice. A tank saved before the shop is paid what it already
  * earned on its first boot with it, once (Strato: "yes, pay it once"). */
-#define SD_MEAL        2
-/* a meal pays SD_MEAL once per SD_MEAL_GAP_S of awake time (0.3.7): every
- * feed gesture the fish eat from is still a MEAL (the fry's feeding gates
- * count them as before), but tapping the surface while the school ate paid
- * SD_MEAL a tap (a keeper on Discord, 2026-10-18). A night's sleep runs the
- * wait down like awake time. */
+#define SD_MEAL        1
+/* a meal pays SD_MEAL PER FISH, each fish once per SD_MEAL_GAP_S of awake
+ * time (0.3.9, Strato 2026-10-23: +1 a fish, was +2 a meal): one gap for the
+ * whole tank (0.3.7) left a hungry fish fed by hand unpaid because a
+ * tank-mate had just eaten (a keeper on Discord). +1 keeps a 2-fish tank at
+ * the 0.3.7 pace and lets a full tank of 5 earn 2.5x. The gap still stops a
+ * tap-spam paying a tap (a keeper on Discord, 2026-10-18); every feed gesture
+ * the fish eat from is still a MEAL (the fry's feeding gates count them as
+ * before). A night's sleep runs each wait down like awake time; a boot
+ * starts them clear. */
 #define SD_MEAL_GAP_S  300.0f
 #define SD_STAGE_JUV   5
 #define SD_STAGE_ADULT 10
@@ -191,6 +195,8 @@ const char *const *progression_fry_tip(int kind);
 #define SD_BIRTH       20
 #define SD_TRUST       15
 #define SD_SNACK       10          /* the seahorse's snack, one paid per SH_SNACK_COOL_S (0.3.6) */
+#define SD_CRAB_FIND   10          /* a sand dollar the crab dug up and the keeper took (0.3.9; Strato 2026-10-24: a rare event, "worth a bit more") */
+#define SD_CRAB_FIND_AGAIN 20      /* ... every one after the first: the badge's reward (Strato 2026-10-24: "double the value of the subsequently found") */
 #define SD_CHORE       25          /* per SD_CHORE_EVERY colonies / SD_TRIM_CM of grass */
 #define SD_CHORE_EVERY 100
 /* the grass pays by length cut: 250 cm (2026-09-29, Strato; was 100 inches =
@@ -206,9 +212,12 @@ const char *const *progression_fry_tip(int kind);
 #define SD_PRICE_URCHIN 120       /* 2026-10-02: the grass's snail (the snail is 80, the grass pays 25 per 250 cm) */
 #define SD_PRICE_SEAHORSE 220     /* 0.3.6, Strato 2026-10-15: between the shrimp (180) and the cluster (240) */
 #define SD_PRICE_PUMPKIN 75       /* 0.3.6, Strato 2026-10-17: the seasonal lantern, "affordable" */
+#define SD_PRICE_VOLCANO 190      /* 0.3.9: Strato 2026-10-24 (it was the castle's 150 until he named one) */
+#define SD_PRICE_CRAB 140         /* 0.3.9: the strawberry crab - Strato 2026-10-24 */
 typedef struct {
     uint32_t    bit;               /* SD_ITEM_* */
-    const char *name;              /* <= 12 chars, the pixel font */
+    const char *name;              /* <= 15 chars: the row draws it at scale 2 from x 76, 178 px, short of the button at 300;
+                                    * the modal at scale 3, 267 px in 352 */
     const char *words, *words2;    /* what it does, two lines of <= 25 chars */
     int         price;
 } sd_item_t;
@@ -230,6 +239,24 @@ bool progression_pumpkin_offered(const tank_t *t);
 #define SD_SELL_PCT 20
 int  progression_sell_value(int item);
 bool progression_sell(tank_t *t, int item);
+/* the decoration shelf (0.3.9, Strato 2026-10-19: "anything you can MOVE
+ * you can SHELVE"; from the community: nothing bought ever disappears). A
+ * placeable piece in the tank goes on the shelf: still owned, out of the
+ * water, its spot / depth / color / growth kept - and the living ones keep
+ * growing there. No money moves. PUT BACK returns it on top of its stack
+ * and the platform opens the placement page with the old spot in place.
+ * SELL works from the shelf too (progression_sell). false = not owned, not
+ * placeable, or already where it is asked to go. */
+bool progression_shelve(tank_t *t, int item);
+bool progression_unshelve(tank_t *t, int item);
+/* the LOCK on a piece (0.3.9, Strato, from the community: a held finger on a
+ * decoration keeps opening its placement page by accident). on = a held
+ * finger passes the piece by from now on; its page opens from the shop's
+ * row (MOVE) only, where the same button reads LOCKED and undoes it. Each
+ * piece has its own lock; it rides the shelf and goes with a sale. Saved at
+ * once. false = not owned, not placeable, or already as asked. */
+bool progression_lock(tank_t *t, int item, bool on);
+#define SD_DECOR_BITS (SD_ITEM_PLANT | SD_ITEM_CASTLE | SD_ITEM_CORAL | SD_ITEM_CLUSTER | SD_ITEM_PUMPKIN | SD_ITEM_VOLCANO)   /* the placeable six */
 /* a fish sold (2026-10-01, Strato: a SELL button on the milestones page's
  * fish card - "the more mature a fish is, the more sand dollars it is
  * worth. once a fish is sold it opens up a slot for a new fry"). The price
@@ -284,7 +311,7 @@ int  progression_sd_take_award(void);
 /* director / tests: dollars from nowhere (negative takes them away) */
 void progression_sd_grant(tank_t *t, int n);
 /* the earn table for the shop page: one line per source, "+N WORDS" */
-#define SD_EARN_LINES 7
+#define SD_EARN_LINES 8
 const char *const *progression_sd_earn_lines(void);
 
 /* population ceiling. Compile-time so the device can ship lower until its

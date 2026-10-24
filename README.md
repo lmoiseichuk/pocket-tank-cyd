@@ -47,7 +47,7 @@ no toolchain needed. Come hang out with other keepers on the
 **[Pocket Tank Discord](https://pocketank.com/discord)**: show off your tank,
 get help, and share ideas for what comes next.
 
-The current release is **v0.3.8** (alpha); the settings page shows the one
+The current release is **v0.3.8.1** (alpha); the settings page shows the one
 on your tank. What changed in each release:
 **[pocketank.com/updates](https://pocketank.com/updates/)**.
 
@@ -386,6 +386,28 @@ light off (double-tap the glass) and its candle lights the water, the sand,
 the grass and whatever swims by, and anything in front of it, the castle
 too, throws a shadow across the sand. Finally a good reason to turn the
 tank light off.
+
+**The bubble volcano.** The tenth thing in the shop (190). A cone of
+stacked boulders as wide as the castle, with a pool of lava at the top
+that breathes, a stream of bubbles rising from the crater and a cave at
+its foot. Turn the tank light off and the lava and the bubbles keep their
+glow on the water and the sand. BEHIND or IN FRONT, like the castle.
+
+**The strawberry crab.** The eleventh thing in the shop (140). A small red
+crab with white spots that lives on the sand. It strolls, digs, eats the
+pellets that reach the floor, naps in the castle's arch or the volcano's
+cave, and comes out more with the light off. Tap it for its card; three
+quick raps send it running for cover. Now and then a dig turns up a sand
+dollar and it holds it up for a minute: tap it to take it, 10 sand dollars
+the first time and 20 every time after. The crab, the urchin and the snail
+wander in front of your decorations as often as behind them.
+
+**The shelf, and the lock.** Since 0.3.9 anything you can move you can
+also put away: SHELVE on a piece's page or in its shop panel, and it waits
+on the shelf, drawn as it is in a little tank on its shop row, where a
+coral or a plant keeps growing; PUT BACK returns it to its spot. LOCK on
+the page keeps a piece where it stands: a held finger passes it by from
+then on, and the shop's MOVE still moves it.
 
 **The night shift.** The snail and the urchin keep working while the tank
 sleeps. A tank with a snail wakes up with about a third less algae on the

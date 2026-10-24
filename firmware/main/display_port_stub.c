@@ -33,6 +33,9 @@ int  display_port_view(void) { return DISPLAY_VIEW_FIT; }
 void display_port_panel_to_tank(int px, int py, float *tx, float *ty) { *tx = (float)px; *ty = (float)py; }
 
 void display_port_flush_prof(int64_t *wait_us, int64_t *send_us) { *wait_us = *send_us = 0; }
+bool display_port_flush_async(const uint16_t *fb, void (*done)(const uint16_t *, void *), void *arg) { (void)fb; (void)done; (void)arg; return false; }
+void display_port_flush_wait(const uint16_t *fb) { (void)fb; }
+void display_port_flush_async_prof(int64_t *task_us, int *frames, int64_t *copy_us) { *task_us = 0; *frames = 0; *copy_us = 0; }
 void display_port_flush(const uint16_t *fb) {
     (void)fb;
     frames++;

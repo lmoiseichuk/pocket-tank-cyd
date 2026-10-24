@@ -37,4 +37,7 @@ extern bool  advisor_core_sample;
 extern float advisor_core_temp;
 /* last decision's full goal distribution (for debug / narration) */
 const float *advisor_core_last_probs(void);
+/* true once any decision's odds came back not a number (NaN / inf): a damaged
+ * model. Sticky until the next start; the platform raises NOTICE_MODEL_DAMAGED. */
+bool advisor_core_damaged(void);
 #endif

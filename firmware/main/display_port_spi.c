@@ -37,6 +37,9 @@ static const char *TAG = "ili9341";
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include <string.h>
+#ifndef PT_FB_SWAP
+#define PT_FB_SWAP 0                            /* (render.h's default; tankcore defines it 1 on every board) */
+#endif
 
 #define LCD_HOST    SPI2_HOST
 #define STRIPE_ROWS 20                          /* tank rows per DMA transfer: 320 x 20 x 2 = 12.8 KB */
@@ -171,11 +174,18 @@ void display_port_flush(const uint16_t *fb) {
         uint16_t *stripe = s_stripe[current];
         const uint32_t *source = (const uint32_t *)(fb + y0 * TANK_W);
         uint32_t *destination = (uint32_t *)stripe;
+#if PT_FB_SWAP
+        /* The frame is in the panel's byte order already (v0.3.9: tankcore
+         * builds every board with PT_FB_SWAP, render.h): the stripe is only
+         * the copy out of PSRAM into DMA-capable internal RAM. */
+        memcpy(destination, source, (size_t)rows * TANK_W * sizeof(uint16_t));
+#else
         /* Two pixels per 32-bit word: swap the bytes inside each half. */
         for (int i = 0; i < rows * TANK_W / 2; i++) {
             uint32_t pair = source[i];
             destination[i] = ((pair & 0x00FF00FFu) << 8) | ((pair & 0xFF00FF00u) >> 8);
         }
+#endif
         esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, y0, TANK_W, y0 + rows, stripe);
         if (err != ESP_OK) {
             xSemaphoreGive(s_stripe_free);          /* no transfer, so no completion will return it */
@@ -207,3 +217,9 @@ void display_port_set_view(int view) { (void)view; }
 int  display_port_view(void) { return DISPLAY_VIEW_FIT; }
 void display_port_panel_to_tank(int px, int py, float *tx, float *ty) { *tx = (float)px; *ty = (float)py; }
 void display_port_flush_prof(int64_t *wait_us, int64_t *send_us) { *wait_us = 0; *send_us = 0; }
+/* (v0.3.9) no flush task here: display_port_flush already overlaps its two
+ * stripes with the wire, so flush_async says "not available" and main flushes
+ * the plain way; with nothing in flight there is nothing to wait for */
+bool display_port_flush_async(const uint16_t *fb, void (*done)(const uint16_t *, void *), void *arg) { (void)fb; (void)done; (void)arg; return false; }
+void display_port_flush_wait(const uint16_t *fb) { (void)fb; }
+void display_port_flush_async_prof(int64_t *task_us, int *frames, int64_t *copy_us) { *task_us = 0; *frames = 0; *copy_us = 0; }

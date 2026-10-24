@@ -271,7 +271,8 @@ enum {
     /* 1u << 13 is 0.4's TMS_FIRST_MUTATION (main): never set on 0.3.x */
     TMS_FIRST_SALE = 1u << 14,                               /* a fish sold: fry for sale in the shop (0.3.5) */
     TMS_SEAHORSE_FED = 1u << 15,                             /* the seahorse's first snack (0.3.6); its badge shows once it is bought */
-    TMS_COUNT = 16
+    TMS_CRAB_FIND = 1u << 16,                                /* the crab's first sand dollar, taken (0.3.9); its badge shows once it is bought */
+    TMS_COUNT = 17
 };
 
 typedef struct {
@@ -319,6 +320,10 @@ typedef struct {
     goal_id_t goal_prev;    /* the goal before the current one: returning to it is no relief */
     int8_t zone_last;       /* schema zone 0..5 the fish was in last frame; -1 = none yet */
     bool   at_bubbles;      /* inside the column's play radius on a VISIT_BUBBLES goal (the bubbles cue fires on entry) */
+    float  breather;        /* the breather (2026-10-21): seconds spent ducking into the nearest canopy
+                             * because the fish is spent (energy under BREATHER_AT by day), 0 = none.
+                             * The advisor keeps its goal; the body answers it again with its wind back.
+                             * Not saved: a boot starts fresh. */
     bool   hold_far;        /* was HOLD_APPROACH_FROM+ px from the finger when this hold's draw
                              * began (transient): only such a fish can earn a hold-approach */
     float  zone_seen[6];    /* tank clock when the fish was last in each zone */
@@ -326,6 +331,8 @@ typedef struct {
     bool   explore_set;     /* ... valid; cleared when explore is (re)chosen or reached */
     int    eaten;
     int    eaten_player;    /* pellets that came from the keeper's hand */
+    bool   meal_due;        /* ate from the keeper's hand since progression last looked (the meal pay) */
+    float  meal_pay_wait;   /* seconds before this fish's meal pays again (SD_MEAL_GAP_S). Not saved */
     bool   starve_flagged;  /* diagnostic: starving-ignored-food episode counted */
     float  trust;           /* 0..10: gates approach-to-finger; drifts with treatment */
     float  drift_acc;       /* lifetime personality PRESSURE: every unit bold/sociable wanted
@@ -352,6 +359,10 @@ typedef struct {
  * nibbled = seconds of shrimp pecking (SHRIMP_PECK_S eats it). */
 typedef struct { float x, y, age; bool alive, from_player; float floor_s, nibbled; } food_t;
 #define FOOD_FLOOR_Y   (TANK_BOT - 14)  /* where a pellet comes to rest */
+#define FISH_FLOOR_Y   (TANK_BOT - 16)  /* the sand line: a fish is never DRAWN below it (render.c) - a fin
+                                         * that reaches the floor touches it instead of showing through it
+                                         * (2026-10-24; the pellets rest 2 px into the sand, so a fish eating
+                                         * off the floor lies on it) */
 #define FOOD_SINK_PX_S 8.0f
 /* in the water: gone at this age if it never reached the floor - a cap that
  * every pellet's fall fits under, the deepest drop on the glass plus a margin.
@@ -359,7 +370,8 @@ typedef struct { float x, y, age; bool alive, from_player; float floor_s, nibble
  * bowl's middle are 46-60 s, so pellets vanished mid-water there before the
  * shrimp could reach them - a keeper on the watch, 2026-10-18) */
 #define FOOD_LIFE_S    (FOOD_FLOOR_Y / FOOD_SINK_PX_S + 5.0f)
-#define FOOD_FLOOR_S  15.0f          /* ... and how long it rests there (Strato, 2026-09-29) */
+#define FOOD_FLOOR_S  30.0f          /* ... and how long it rests there (15 from 2026-09-29; doubled 2026-10-24, Strato testing the crab: "it's quite
+                                      * challenging to have the crab get any food ... he can't get there quick enough") */
 
 /* the shrimp school (2026-09-29, the shop's sixth item, SD_ITEM_SHRIMP): cherry
  * shrimp that swim as a loose school with a pull toward the grass, swarm the
@@ -488,6 +500,17 @@ typedef struct tank {
      * All saved. */
     int32_t  sd_balance, sd_earned;
     uint32_t sd_unlocks;
+    uint32_t sd_shelved;           /* the decoration shelf (0.3.9): owned pieces put away for later -
+                                    * a subset of sd_unlocks, placeable bits only. A shelved piece keeps
+                                    * its spot / depth / color / growth and keeps GROWING, but is not in
+                                    * the water: tank_decor_in says what is. Saved. */
+    uint32_t sd_locked;            /* LOCKED pieces (0.3.9, Strato: "the ability to 'lock' decorations
+                                    * in place so you can't accidentally enter the move menu when
+                                    * tapping and holding"): a subset of sd_unlocks, placeable bits.
+                                    * A held finger passes a locked piece by (tank_decor_hit); its
+                                    * placement page opens the long way only - keeper menu, UPGRADES,
+                                    * its row, MOVE - and that page's LOCK button undoes it. Kept
+                                    * across the shelf, cleared by a sale. Saved. */
     uint32_t sd_paid_fish[N_FISH_MAX];
     int32_t  sd_colonies_paid, sd_inches_paid;
     int32_t  sd_snacks_paid;       /* the seahorse's snacks paid so far (0.3.6) */
@@ -496,6 +519,8 @@ typedef struct tank {
      * position is saved; heading / target are not. */
     float    snail_x, snail_y, snail_heading;
     int16_t  snail_cell;           /* the algae cell it is heading for, -1 = wandering */
+    float    snail_dy;             /* px DOWN from SNAIL_FLOOR_Y on its floor walk: in its front lane inside a piece IN FRONT's footprint it eases
+                                    * onto that piece's base line (DECOR_FY_FRONT), like the urchin and the crab (Strato 10-24) */
     float    snail_graze;          /* seconds on the current cell */
     bool     snail_front;          /* walking the floor, it passes IN FRONT of a reef cluster or coral placed
                                     * IN FRONT (0.3.2, Strato: "it marches to the beat of its own drum" - the
@@ -517,6 +542,55 @@ typedef struct tank {
     float    urchin_rest;          /* seconds left of the rest */
     float    urchin_grazed_px;     /* grass it has eaten, lifetime, in the trim's px (VEG_PAY_PX:
                                     * the same length on every board; its card shows cm). Saved */
+    float    urchin_dy;            /* px DOWN from URCHIN_FLOOR_Y: in its front lane inside a piece IN FRONT's footprint it eases onto that piece's
+                                    * base line (DECOR_FY_FRONT) - in front of the castle it stands on the castle's floor, not over it (Strato 10-24) */
+    bool     urchin_front;         /* its LANE: in front of the pieces placed IN FRONT (render's front slot) or behind them; rolled 60/40
+                                    * at a move's start, only while it is clear of every such piece (tank_floor_clear) - never a pop */
+    /* the strawberry crab (SD_ITEM_CRAB, 0.3.9, 2026-10-23; Vulcanite's crab
+     * idea, drawn after Strato's strawberry-crab sheets: render.c draw_crab).
+     * A red dome with cream seeds: it walks the sand in profile, digs and
+     * nibbles where it stops, comes out for food on the floor, and roosts in
+     * the castle's arch or the volcano's cave FACING THE GLASS, tucked in on
+     * itself. Its x and its seed pattern (cr_variant, drawn at purchase) are
+     * saved; what it is doing is not. The model never sees it. */
+    float    cr_x;                 /* its middle x on the floor; < 0 = not placed */
+    float    cr_y;                 /* its height over the sand: 0 but on the volcano's flank (CR_CLIMB) */
+    float    cr_tilt;              /* radians, the slope under it (the climb); 0 on the sand */
+    int8_t   cr_facing;            /* 1 = it faces right, -1 = left (the profile; the roost faces the glass) */
+    uint8_t  cr_variant;           /* its seed pattern (saved; any value) */
+    uint8_t  cr_mode;              /* CR_* */
+    int8_t   cr_cave;              /* the shelter it heads for / sits in: 2 the castle's arch, 9 the volcano's cave, -1 none */
+    int8_t   cr_food;              /* the pellet it is after / eating, -1 none */
+    int8_t   cr_side;              /* the climb's flank: -1 the left, 1 the right */
+    float    cr_to;                /* a walk's destination x */
+    float    cr_timer;             /* seconds left in the current mode */
+    float    cr_mode_s;            /* seconds in the current mode (render: the roost settles in) */
+    float    cr_poke;              /* seconds left of its claws up after a tap */
+    float    cr_gait;              /* the gait's phase, radians: advances with the ground it covers (render: the stride) */
+    float    cr_climb;             /* the climb's progress: 0..1 up the flank, 1..2 down again */
+    float    cr_outing;            /* seconds out of a shelter so far: when enough have passed it looks for one */
+    float    cr_since_climb;       /* seconds since it last climbed the volcano (not saved: a rare thing) */
+    uint16_t cr_eaten;             /* pellets it has found and eaten, lifetime (saved; its card) */
+    uint8_t  cr_fidget_kind;       /* CR_FID_*: the small thing it is doing while it rests, digs or roosts */
+    float    cr_fidget;            /* seconds left of it */
+    float    cr_next_fidget;       /* seconds until the next one */
+    float    cr_shuffle_to;        /* a shuffle's x (CR_FID_SHUFFLE) */
+    uint8_t  cr_taps;              /* quick taps so far (tank_crab_tap): the third sends it running */
+    bool     cr_scurry;            /* running for a shelter: CR_SCURRY_PX_S, food ignored, until the next mode */
+    float    cr_tap_t;             /* the clock at the last tap */
+    float    cr_hide;              /* seconds left backed into its shelter's dark (scared) */
+    float    cr_back;              /* how far back into the dark it is, 0 (at the mouth) .. 1: eases in over CR_BACK_IN_S while cr_hide runs,
+                                    * out over CR_BACK_OUT_S after (render: smaller, higher, darker with it - it BACKS UP, never a switch; Strato 10-24) */
+    float    cr_startle_cool;      /* seconds until a fish passing over it can raise its claws again (not saved) */
+    float    cr_find;              /* seconds left holding a SAND DOLLAR up for the keeper (0 = none; not saved): a tap on it takes it */
+    float    cr_find_cool;         /* seconds of awake life until the next find can turn up in a dig (not saved: CR_FIND_*) */
+    uint16_t cr_found;             /* sand dollars it has dug up and the keeper took, lifetime (saved; its card, the badge) */
+    uint16_t cr_found_paid;        /* ... of which the ledger has paid (saved: a find is never paid twice) */
+    bool     cr_was_night;         /* the light at the last tick: it comes out when the light goes off, heads in when it comes on */
+    bool     cr_stood;             /* it has stood off and stepped aside for this snail approach: it holds its ground now (the snail turns back) */
+    bool     cr_lane_front;        /* its LANE for this walk and the stop after it: in front of the pieces IN FRONT, or behind (render's front
+                                    * slot); rolled 60/40 at a walk's start while clear of every such piece; a dig is ALWAYS in front (Strato 10-24) */
+    bool     cr_next_dig;          /* the stop this walk ends in digs (decided at the walk's start, so the lane can be chosen for it) */
     /* the seahorse (SD_ITEM_SEAHORSE, 0.3.6, 2026-10-15): the tame one. It
      * holds a grass blade with its tail (a BEHIND-layer frond, so it is never
      * covered), drifts to another now and then, and when a finger rests on
@@ -606,12 +680,16 @@ typedef struct tank {
      * Both saved. */
     float    pumpkin_x;
     uint8_t  pumpkin_z;
+    /* the bubble volcano (0.3.9): its centre x on the floor (<= 0 = the default
+     * spot) and its depth, BACK or FRONT. Both saved. */
+    float    volcano_x;
+    uint8_t  volcano_z;
     /* the ORDER of the pieces (2026-10-17, Strato: a stack of the pumpkin,
      * the grass, the sword plant and a coral broke): every placeable piece
      * has a rank; among pieces at one depth the higher rank is in front.
-     * By slot (tank_decor_slot): castle, coral, cluster, pumpkin, plant.
-     * Saved. */
-    uint8_t  decor_rank[5];
+     * By slot (tank_decor_slot): castle, coral, cluster, pumpkin, plant,
+     * volcano (DECOR_SLOTS). Saved. */
+    uint8_t  decor_rank[6];
     /* the shrimp school (SD_ITEM_SHRIMP, see SHRIMP_*): how many (saved), the
      * pellets eaten toward the next one (0..SHRIMP_PER_JOIN, saved), the seconds
      * before another may join (saved), each shrimp's motion (not saved: a load
@@ -919,16 +997,20 @@ void  tank_set_bubble_x(tank_t *t, float x);
 
 /* ---- the shop (2026-09-15): sand dollars buy things for the tank ----
  * The items are bits in tank_t.sd_unlocks; progression.c sells them
- * (progression_buy) and tank.c gives them their place. A bought thing is in
- * the tank for good. */
+ * (progression_buy) and tank.c gives them their place. A bought thing is the
+ * keeper's for good: in the tank, or on the shelf (sd_shelved, 0.3.9) until
+ * they put it back. */
 enum { SD_ITEM_PLANT = 1u << 0, SD_ITEM_SNAIL = 1u << 1, SD_ITEM_CASTLE = 1u << 2, SD_ITEM_CORAL = 1u << 3, SD_ITEM_CLUSTER = 1u << 4, SD_ITEM_SHRIMP = 1u << 5,
-       SD_ITEM_URCHIN = 1u << 6, SD_ITEM_SEAHORSE = 1u << 7, SD_ITEM_PUMPKIN = 1u << 8, SD_ITEM_COUNT = 9 };
+       SD_ITEM_URCHIN = 1u << 6, SD_ITEM_SEAHORSE = 1u << 7, SD_ITEM_PUMPKIN = 1u << 8, SD_ITEM_VOLCANO = 1u << 9, SD_ITEM_CRAB = 1u << 10,
+       SD_ITEM_COUNT = 11 };
 /* per-fish paid bits (sd_paid_fish) */
 enum { SD_PAID_JUV = 1u << 0, SD_PAID_ADULT = 1u << 1, SD_PAID_ELDER = 1u << 2, SD_PAID_TRUST = 1u << 3 };
 #define PX_PER_INCH 24.0f          /* the tank reads as ~15 in tall; a fish ~1.7 in */
 #define PX_PER_CM   (PX_PER_INCH / 2.54f)   /* the shop pays grass by the centimeter (SD_TRIM_CM) */
-/* the live bed count: VEG_BEDS, or VEG_BEDS_MAX with the sword plant bought;
- * every loop over beds runs to this. tank_veg_kind is the species (render). */
+/* the live bed count: VEG_BEDS, or VEG_BEDS_MAX with the sword plant bought
+ * AND in the water (a plant on the shelf is no bed: not drawn, not cover, not
+ * cut, not grazed - but it still grows, see veg_grow); every loop over beds
+ * runs to this. tank_veg_kind is the species (render). */
 int   tank_veg_beds(const tank_t *t);
 veg_kind_t tank_veg_kind(const tank_t *t, int b);
 /* the purchases land: the sword plant at VEG_START on the open floor; the
@@ -952,6 +1034,7 @@ void  tank_castle_place(tank_t *t);
 void  tank_coral_place(tank_t *t);
 void  tank_cluster_place(tank_t *t);
 void  tank_pumpkin_place(tank_t *t);
+void  tank_volcano_place(tank_t *t);
 /* placing the decor (2026-09-16, Strato: a bought piece "should allow the
  * player to place the piece wherever they like", with a depth choice): a
  * placeable item has a centre x along the floor - clamped inside the
@@ -1041,6 +1124,27 @@ float    tank_cluster_growth(const tank_t *t);    /* CLUSTER_START..CLUSTER_FULL
  * while SD_PUMPKIN_IN_SHOP (the first release after October 31 drops it);
  * one bought stays for good. */
 #define PUMPKIN_HALF_W    44
+/* the bubble volcano (0.3.9, DonB's #ideas thread; the reference is
+ * working-assets/volcano/Volcano Sprite.png): a cone of stacked boulders
+ * ~184 px wide (the castle's width) and ~200 tall over its floor line, a
+ * lava pool in the crater, cracks down the flanks, a cave mouth at the foot,
+ * drawn procedurally in render.c. Lit bubbles rise from the crater; with the
+ * light off the lava and the bubbles glow on their own. Item 9, BEHIND or
+ * IN FRONT of the plant layer, like the castle. */
+#define VOLCANO_HALF_W    92
+#define VOLCANO_X_DEFAULT TANK_FLOOR_X(224.0f)   /* the open floor between the reef bed and bed 2 */
+/* DEPTH on the sand (0.3.9, Strato 2026-10-23: a piece behind another showed
+ * its base under it, "which would never happen in reality ... we're also
+ * losing depth"): the sand strip is the stage, and a piece stands on a floor
+ * line BY ITS DEPTH, not by what it is - BEHIND at the back of the strip,
+ * IN FRONT at its front edge, 8 px lower - so a piece in front always sits
+ * lower and its base covers the base of anything behind it. With it a piece
+ * BEHIND is hazed a little more with the water and one IN FRONT a little
+ * less, and every piece drops a short contact shadow on what stands behind
+ * it (render.c, the pieces). The grass, the plant layer, is in between. */
+#define DECOR_FY_BACK   (TANK_BOT - 16)
+#define DECOR_FY_FRONT  (TANK_BOT - 8)
+#define DECOR_FY(z)     ((z) == DECOR_Z_FRONT ? DECOR_FY_FRONT : DECOR_FY_BACK)
 #define PUMPKIN_X_DEFAULT TANK_FLOOR_X(222.0f)   /* the open floor between the reef bed and bed 2 (the plant's gap) */
 int      tank_cluster_scheme(const tank_t *t);    /* 0..CLUSTER_SCHEME_N-1 */
 void     tank_cluster_set_scheme(tank_t *t, int i);
@@ -1055,6 +1159,8 @@ void  tank_decor_set(tank_t *t, int item, float x, int z);
 float tank_decor_x(const tank_t *t, int item);   /* the centre, default when unplaced */
 int   tank_decor_z(const tank_t *t, int item);
 float tank_decor_half_w(int item);         /* half the footprint, for the page's clamp / highlight */
+float tank_decor_fy(const tank_t *t, int item);   /* the floor line it stands on, by its depth (DECOR_FY) */
+float tank_decor_height(int item);         /* its highest pixel over that line (the plant: tank_veg_bed) */
 /* the owned, placeable piece under (x, y) - its footprint box on the floor -
  * or -1 (2026-09-24: a tap-and-hold on a piece opens its page); the smaller
  * pieces win a tie. tank_decor_reset puts a SOLD piece back to its factory
@@ -1066,15 +1172,23 @@ void  tank_decor_reset(tank_t *t, int item);
  * its depth (tank_decor_raise); the placement page's two arrows swap it with
  * its neighbour at the same depth (tank_decor_shift). Ties - every older
  * save - keep the old fixed order: castle, coral, cluster, pumpkin, then the
- * plant. The grass beds are the plant layer itself (a piece BEHIND is under
+ * plant (the volcano, 0.3.9, after them). The grass beds are the plant layer itself (a piece BEHIND is under
  * every blade, a piece IN FRONT over them); only the sword plant, bed 3, is
  * a piece with a rank of its own at BACK or FRONT. */
-#define DECOR_SLOTS 5
+#define DECOR_SLOTS 6
 int   tank_decor_slot(int item);                  /* 0..DECOR_SLOTS-1 (the tie order), or -1 */
 int   tank_decor_slot_item(int slot);
-bool  tank_decor_owned(const tank_t *t, int item);
+bool  tank_decor_owned(const tank_t *t, int item);                /* bought (in the tank or on the shelf) */
+bool  tank_decor_in(const tank_t *t, int item);                   /* bought and in the water (0.3.9: not on the shelf) - the word
+                                                                   * every "is the piece here" test reads; the shop reads owned */
+bool  tank_decor_locked(const tank_t *t, int item);               /* owned and LOCKED in place (0.3.9): a hold on it opens nothing */
+/* a poof (0.4's tank link, brought to 0.3.9): a burst of the free bubbles
+ * where something was - a fish's spot, or a piece's whole footprint as it
+ * goes on the shelf (Strato 2026-10-19: "pop away into a plume of bubbles") */
+void  tank_poof(tank_t *t, float x, float y);
+void  tank_decor_poof(tank_t *t, int item);
 int   tank_decor_rank(const tank_t *t, int item);
-int   tank_decor_order(const tank_t *t, int items[DECOR_SLOTS]);   /* the owned pieces, back to front (rank, then slot); the count */
+int   tank_decor_order(const tank_t *t, int items[DECOR_SLOTS]);   /* the pieces IN the tank, back to front (rank, then slot); the count */
 bool  tank_decor_above(const tank_t *t, int a, int b);             /* a is painted over b: a greater depth, or at one depth the higher rank */
 void  tank_decor_raise(tank_t *t, int item);                       /* on top: the highest rank of all + 1 */
 int   tank_decor_neighbor(const tank_t *t, int item, int dir);     /* the piece just in front (+1) or behind (-1) at its depth, or -1 */
@@ -1107,6 +1221,75 @@ bool  tank_snail_hit(const tank_t *t, float x, float y);
 void  tank_urchin_place(tank_t *t);
 bool  tank_urchin_hit(const tank_t *t, float x, float y);
 bool  tank_urchin_chewing(const tank_t *t);   /* at a frond's foot, eating (render: the spines work) */
+/* the strawberry crab (0.3.9, SD_ITEM_CRAB; tank_t.cr_*). Strato's rules from
+ * the first crab (10-23): it "meanders slowly, typically doesn't move around
+ * too much or too fast .. finds a spot and digs, nibbles at the ground. it
+ * should come out for food when food reaches the ground ... should definitely
+ * look to shelter in the cave and castle .. rarely scale the volcano"; and
+ * for this one: "roost or rest in the castle or volcano ... facing forward,
+ * straight toward the glass tucked in on itself". So: its feet on CR_FLOOR_Y;
+ * it rests long and digs and nibbles where it stops (CR_REST, CR_DIG), walks
+ * a short way now and then at a slow crab's pace, its feet planted (CR_WALK),
+ * heads for the castle's arch or the volcano's cave and roosts there facing
+ * the glass for a long while (CR_SHELTER, then CR_ROOST), comes out to any
+ * pellet resting on the floor and eats it (CR_FEED, CR_EAT), raises its claws
+ * for a moment when tapped (cr_poke; a walk stops) - three quick taps send it
+ * running into the nearer shelter (Strato 10-23) - and once in a long while
+ * climbs the volcano's flank to the crater and back (CR_CLIMB;
+ * tank_volcano_half is the rock it follows). Its small life (Strato 10-24): a
+ * fish passing over it gets its claws up (cr_startle_cool), the snail coming
+ * at it a standoff before the step aside (CR_FID_STANDOFF), and it is a
+ * NIGHT crab - roosts by day, out most of the night, comes out when the light
+ * goes off and heads in when it comes on. Its purpose: the SAND DOLLAR FIND
+ * (CR_FIND_*). */
+enum { CR_REST = 0, CR_WALK, CR_DIG, CR_SHELTER, CR_ROOST, CR_FEED, CR_EAT, CR_CLIMB };
+/* its idle life (Strato 10-23 on the first flash: "it stays completely motionless ... for too long"):
+ * every few seconds while it rests or digs it grooms (a claw past its mouth), shuffles a few px,
+ * turns about or settles lower; roosting it stretches its claws open now and then */
+enum { CR_FID_NONE = 0, CR_FID_GROOM, CR_FID_SHUFFLE, CR_FID_SETTLE, CR_FID_STRETCH, CR_FID_STANDOFF };   /* STANDOFF: claws up at the snail, then the step aside (Strato 10-24) */
+#define CR_PICK_S   2.4f       /* a dig's (and a meal's) pick: down to the sand, pinch, a bite up to its face */
+#define CR_GROOM_S  1.6f
+#define CR_SETTLE_S 1.2f
+#define CR_STRETCH_S 1.8f
+#define CR_STANDOFF_S 1.5f
+#define CR_BACK_IN_S  1.5f       /* scared in its roost: it backs into the dark over this long ... */
+#define CR_BACK_OUT_S 3.0f       /* ... and comes forward again, slowly, over this (Strato 10-24: "slowly come back out and reveal itself") */
+/* THE LANES (Strato 2026-10-24, a keeper on Discord: "I'm worried I might not see my crab half of the time like the
+ * sea urchin"): a decoration placed IN FRONT is in front of the FISH and the FRONDS, always - but the critters that
+ * roam the sand (the crab, the urchin, the snail on its floor walk) each take a lane per move, 60 in front / 40
+ * behind, and a lane changes only while the critter overlaps no piece IN FRONT (tank_floor_clear), so it never
+ * pops through one. The crab digging for sand dollars is in front whatever the lane. */
+#define LANE_FRONT_ODDS 0.6f
+/* the SAND DOLLAR FIND (Strato 2026-10-24: "I want it to be fun and seem like a really nice reward"): once in a
+ * while a dig turns one up; it holds it up in its claw, glinting, for CR_FIND_HOLD_S - a tap on the crab takes it
+ * (SD_CRAB_FIND, progression's ledger: cr_found / cr_found_paid) - or it buries it again. The wait between finds
+ * runs on awake time and is not saved: the first comes soon after the purchase, a boot waits a while, a find taken
+ * waits the longest, one missed comes round sooner. */
+#define CR_FIND_HOLD_S      60.0f
+#define CR_FIND_FIRST_LO_S  (45 * 60.0f)
+#define CR_FIND_FIRST_HI_S  (90 * 60.0f)
+#define CR_FIND_BOOT_LO_S   (2 * 3600.0f)
+#define CR_FIND_BOOT_HI_S   (4 * 3600.0f)
+#define CR_FIND_NEXT_LO_S   (6 * 3600.0f)
+#define CR_FIND_NEXT_HI_S   (8 * 3600.0f)
+#define CR_FIND_MISSED_LO_S (2 * 3600.0f)
+#define CR_FIND_MISSED_HI_S (4 * 3600.0f)
+#define CR_FLOOR_Y  (TANK_BOT - 15.0f)
+#define CR_HALF_W   22.0f
+void  tank_crab_place(tank_t *t);
+bool  tank_floor_clear(const tank_t *t, float x, float half);   /* no piece IN FRONT over [x - half, x + half] on the floor: a lane may change here */
+bool  tank_crab_hit(const tank_t *t, float x, float y);
+void  tank_crab_scare(tank_t *t, float fx); /* run for cover now (the tank's triple-tap startle calls it: a knock anywhere on the glass) */
+int   tank_crab_tap(tank_t *t, float fx);  /* a tap on it (fx: the finger's x): claws up; the third quick tap sends it running
+                                             * into the nearer of the castle and the volcano (away from the finger with neither). Returns the taps so far;
+                                             * 0 = the tap TOOK the sand dollar it was holding up (no card) */
+bool  tank_crab_walking(const tank_t *t);   /* its legs are striding (render; a shuffle too) */
+bool  tank_crab_roost(tank_t *t, int cave);  /* go roost now: 2 the castle, 9 the volcano, -1 the nearer (director, sim) */
+/* the volcano's cone, half its width in sprite cells (2 px) at height y
+ * (cells up from the sprite's bottom row, which sits on tank_decor_fy) on
+ * side s (-1 left, 1 right): the same rock render.c vo_half draws; the crab
+ * climbs it (tank.c). */
+float tank_volcano_half(float py, int s);
 /* the seahorse (0.3.6; the fields above have the story). Its anchor
  * (sh_x, sh_y) is the centre of its tail's coil: on a blade that is the
  * blade's spine at the grip row (the renderer adds the sway); adrift and at
@@ -1148,7 +1331,7 @@ enum { SH_POSE_BLADE = 1, SH_POSE_GRIP = 2 };
 float tank_seahorse_jut(const tank_t *t);          /* the head's jut right now, px (the renderer) */
 #define SH_SNACK_COOL_S (10.0f * 60.0f)   /* one PAID snack per this long (Strato: "10 minute cooldown so it can't be abused") */
 void  tank_seahorse_place(tank_t *t);              /* fresh in the tank: on a blade, or adrift by the grass */
-const char *tank_seahorse_holding(const tank_t *t); /* its card: A BLADE / A LEAF / THE CASTLE / THE CORAL / THE REEF / THE SAND */
+const char *tank_seahorse_holding(const tank_t *t); /* its card: A BLADE / A LEAF / THE CASTLE / THE CORAL / THE REEF / THE VOLCANO / THE SAND */
 bool  tank_seahorse_hit(const tank_t *t, float x, float y);
 float tank_seahorse_days(const tank_t *t);        /* its card: whole days with the keeper */
 

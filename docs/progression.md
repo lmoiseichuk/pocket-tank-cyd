@@ -163,6 +163,42 @@ was before.
   The spot and the layer ride in the save (`plant_x`, `plant_z`); older saves
   read the default spot, AMONG. The snail is not placeable - it goes where
   the film is.
+- **The decoration shelf (0.3.9, Strato 2026-10-19: "anything you can
+  MOVE you can SHELVE").** A placeable piece in the tank (the sword plant,
+  the castle, the coral, the reef cluster, the pumpkin) has MOVE | SHELVE in
+  its shop modal. SHELVE puts it on the shelf: still the keeper's (its bit in
+  `sd_unlocks` stays), out of the water (`sd_shelved`, append-only in the
+  save at 1908; `tank_decor_in` is the word every "is it here" test reads -
+  the order of the pieces, the reef landmark, the seahorse's posts, the
+  finger, the pumpkin's light, the castle's shadow, the plant as a bed), its
+  spot / depth / color / look kept, and the living ones KEEP GROWING there
+  (the coral and the cluster through their own ticks, the plant's bed
+  through `veg_grow` - but it is no bed: not drawn, not cover, not cut, not
+  grazed). No money moves; the piece pops away into a plume of bubbles
+  (`tank_decor_poof`, the free bubbles across its footprint). Its row says
+  ON THE SHELF with a PUT BACK button;
+  a living piece shows AS IT IS in a little glass tank in the row's icon
+  slot (its painter at full size into the frame as scratch, box-filtered
+  into a 64 px thumb in the decor scratch, rebuilt only when its growth
+  moves a percent or the shop reopens); the castle and the pumpkin sit as
+  their icon on a shelf board. Its modal has PLACE | SELL: PLACE (or the
+  row's PUT BACK) returns it on top of its depth and opens the placement
+  page with the old spot in place; SELL (armed, then confirmed) sells it from
+  the shelf at the same 20%. The placement page itself (a held piece on the
+  glass opens it) has SELL | SHELVE on its top row with DONE, so a piece can
+  be put away from the glass without the shop; its order arrows sit at the
+  ends of the DEPTH row. SELL left the in-tank modal: selling a piece in
+  the tank is MOVE, then the placement page's SELL (top left, armed twice) -
+  one more tap for the one irreversible act. An older firmware ignores the
+  field: the shelved piece stands in the tank at its kept spot (nothing
+  lost). Director: `shelve` / `unshelve <piece>`.
+- **Seasons (0.3.9):** a seasonal piece leaves the SHOP, never the tank
+  (community feedback, 2026-10-19: nothing bought ever disappears). The
+  pumpkin is sold while `SD_PUMPKIN_IN_SHOP` is 1 - 0 from the first release
+  of November; an owner keeps it, its row (MOVE / SHELVE / SELL) and its
+  light, and the shelf is where it winters until the flag is 1 again in
+  October. Its modals say NOT IN THE SHOP NOW while the build does not sell
+  it, so a SELL is an informed one.
 - Dollars earned during play show as a small "+N" toast over the live tank.
 
 ## IMU (motion)
