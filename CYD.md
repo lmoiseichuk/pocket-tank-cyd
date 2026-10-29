@@ -40,8 +40,8 @@ Against upstream's main (`git log upstream/main..main`):
   I2C socket, and laying the board face down then sleeps the tank
   (*The IMU*).
 - **What the CYD goes without.** No updates over Wi-Fi and no UPDATES
-  button, no battery pill or page, no PWR key, no clock chip (*What the CYD
-  does not have*).
+  button, no battery pill or page, no BATTERY row on the hidden ADVANCED
+  page, no PWR key, no clock chip (*What the CYD does not have*).
 - **Two rules scaled to the smaller tank, on the 320 x 240 boards only.**
   The model's distance bands scale with the tank's width, and the algae
   films the glass at the 1.8's pace per cell (*What the port changes*).
@@ -172,11 +172,37 @@ shelf. A locked piece opens only from the shop.
 At the foot: the release and the build id, small and dim ("V0.3.4 ALPHA
 BUILD ...", cut short of CLOSE), and CLOSE. There is no UPDATES button.
 
+### The ADVANCED page
+
+Hidden on purpose since 0.3.9.2, so that no child stumbles on it: no button
+leads there. With the settings page up, hold BOOT for five seconds, then,
+still holding it, tap the glass. In the board's case BOOT cannot be
+reached, and the director's `advanced` is the only way in
+(*The serial console (the director)*).
+
+On the CYD and the Touch-LCD-2 it has one row, **TOUCH**, for a glass whose
+taps miss their mark. CALIBRATE, then START, brings up nine crosses in turn:
+tap the middle of each, holding the board as you usually do. Then one more
+cross: tap it within 15 s and the new touch is kept, or the old one comes
+back. Presses scattered too widely are refused (DID NOT WORK - TRY AGAIN),
+and 30 s without a press on a cross stops the sitting with nothing changed.
+While a touch of your own is in use, RESET TOUCH goes back to the board's
+own. BACK returns to the settings page.
+
+The touch is kept in NVS beside the tank's save, not in it (`adv/tfit`): a
+reset tank keeps it, and erasing the save region over the cable drops it.
+
+Upstream's page also has a **BATTERY** row, which sets the charge current
+of the AMOLED boards' AXP2101 to the cell's size. No 320 x 240 board has a
+charger the firmware can set, so here the row is not drawn and none of its
+taps answer (`ADV_BATTERY_ROW` in `common/advanced.h`).
+
 ### Sleeping and waking
 
 What puts the tank to sleep:
 
-- a short press of **BOOT** (at its release);
+- a press of **BOOT** (at its release), unless the press opened the reset
+  prompt or the ADVANCED page;
 - **laying it face down**, level and still, for 2 s - with an IMU fitted;
 - the director's `deepsleep [N]` and `poweroff`, over the serial port
   (*The serial console (the director)*).
@@ -233,22 +259,29 @@ are the AMOLED board's too; face down is the CYD's. Moving it, and BOOT:
 | turn it screen up, or pick it up | it wakes where it was, fish and all |
 | touch the glass while it sleeps | it wakes where it was; that touch does nothing in the tank (not while it lies face down) |
 | short press of BOOT | sleeps the tank; another press wakes it in place (face down or not) |
-| hold BOOT and tap the glass | the *Reset tank?* prompt |
+| hold BOOT 5 s, then tap the glass with BOOT still down | the *Reset tank?* prompt; on the settings page, the ADVANCED page. A tap sooner is an ordinary tap, and letting go of BOOT then sleeps the tank |
 
 The SLEEP row decides what every way into sleep does, face down included.
 How each gesture is told apart: *Gestures* under *The IMU*.
 
 ### Starting over
 
-Hold BOOT and tap the glass: a *Reset tank?* prompt comes up over the water
-with NO and YES. YES wipes the save, and two new fry take the tank with the
-first-run setup to name them; NO, a sleep, or twenty seconds with no answer
-keep everything.
+Hold BOOT for five seconds, then, still holding it, tap the glass: a
+*Reset tank?* prompt comes up over the water with NO and YES. YES wipes the
+save, and two new fry take the tank with the first-run setup to name them;
+NO, a sleep, or twenty seconds with no answer keep everything.
+
+The five seconds are new in 0.3.9.2, so that a child cannot wipe a tank by
+accident. A tap sooner is an ordinary tap - on the surface it drops
+pellets, on a fish it opens its card - and letting go of BOOT then puts the
+tank to sleep, as a short press does. A finger already on the glass when
+the five seconds are up does not count: lift it and tap again.
 
 YES erases the tank's whole NVS namespace. BRIGHTNESS, SCREEN and SLEEP are
 saved again at once, so they stay as they were. LIGHTS OUT, AUTO FEED and
 the ROTATION lock live in the save and go back to their defaults. VOLUME
 keeps sounding as it was until the next restart, and is NORMAL after it.
+A touch kept on the ADVANCED page is not in that namespace and stays.
 
 BOOT cannot be reached in the board's case: take it out, or erase the save
 over the cable, which keeps the app and the model (*Recovering a board*).
@@ -262,7 +295,8 @@ over the cable, which keeps the app and the model (*Recovering a board*).
 - **No battery pill or battery page.** They need the AMOLED's fuel gauge
   (the AXP2101); with none answering the tank never shows them, and the
   low-battery notice never comes. The cell's voltage reaches GPIO9, but
-  nothing reads it yet (*Still open*).
+  nothing reads it yet (*Still open*). Nor is there the ADVANCED page's
+  BATTERY row, which sets that chip's charge current (*The ADVANCED page*).
 - **No PWR key.** BOOT is the sleep key.
 - **No clock chip.** The time runs on through sleep; a power cut or the
   RESET button loses it (*Still open*).
@@ -342,6 +376,9 @@ this way does not restart the board. The ones a CYD owner uses:
 - `deepsleep [N]` and `poweroff` - put the tank to sleep as BOOT does; with
   `N`, it wakes by itself after `N` seconds.
 - `clock` - the tank's time and where it came from.
+- `advanced` and `advanced off` - the hidden ADVANCED page up or closed,
+  without the BOOT chord: the only way to it with the board in its case
+  (*The ADVANCED page*).
 
 The boot log, with its I2C bus scan, shows only from a restart. From
 `firmware/`, the script's own `idf.py` line with `monitor` in place of
@@ -366,7 +403,8 @@ Each of these needs ESP-IDF's environment (the `export.sh` line above).
 
 - **Start a fresh tank without BOOT** by erasing the save alone; the app and
   the model stay, and the next boot opens the first-run setup. Brightness,
-  the SCREEN row and the SLEEP row go with it:
+  the SCREEN row, the SLEEP row and a touch kept on the ADVANCED page go
+  with it:
 
   ```sh
   esptool.py --chip esp32s3 -p <port> erase_region 0x9000 0x6000
@@ -718,8 +756,8 @@ g); *Gestures, in short* is the keeper's version of this.
 | screen up / picked up, asleep (CYD) | no longer face down on two reads in a row, 0.2 s apart (one read, each 1 s of the deepsleep mode's grace) | wakes in place - after a sleep that began face down | `imu_port_face_down_now`, `enter_dark` |
 | picked up or tilted, dark (320 x 240) | still for ~1 s sets the rest pose; then off it by 2500 (~0.15 g) on two reads in a row, 0.2 s apart; not in a dark begun face down | wakes in place | `imu_port_rest_moved`, `enter_dark` |
 | a touch, dark (320 x 240) | a finger on the glass, after the glass was seen clear; not in a dark begun face down | wakes in place; that touch does nothing in the tank | `touch_port_finger_now`, `touch_port_swallow` |
-| BOOT, short press | the button (GPIO0), at release | sleep - on a 320 x 240 board the dark, which a press ends; in the deepsleep mode a press within the 20-minute grace wakes in place, and after it BOOT boots | `sleep_button_poll`, `enter_sleep_for` |
-| BOOT held + a tap | a touch landing while BOOT is down | the *Reset tank?* prompt | `sleep_button_poll` |
+| BOOT, short press | the button (GPIO0), at release, when the press opened no chord | sleep - on a 320 x 240 board the dark, which a press ends; in the deepsleep mode a press within the 20-minute grace wakes in place, and after it BOOT boots | `sleep_button_poll`, `enter_sleep_for` |
+| BOOT held 5 s + a tap | a touch landing at least `ADV_BOOT_HOLD_S` (5 s) after BOOT went down, BOOT still down; a finger landing sooner is an ordinary tap, and one already resting there does not count (0.3.9.2) | the *Reset tank?* prompt; on the settings page the ADVANCED page | `sleep_button_poll` |
 | double-tap the glass | two quick taps, then a pause (LIGHTS OUT on DOUBLE-TAP, the default) | the tank light on / off, saved | `tank.c` (`light_manual_off`) |
 
 The face-down rows need `POCKET_TANK_IMU_FACE_DOWN_SLEEP` (on for the CYD),
@@ -771,7 +809,16 @@ there needs the IMU's INT line wired (below).
 
 - **Battery.** The cell's voltage reaches GPIO9 through the board's divider,
   whose ratio is still to be measured. Without a meter the battery pill and
-  its page stay hidden (the page is still laid out for 448 x 368).
+  its page stay hidden (the page is still laid out for 448 x 368, and the
+  pill, at x 260, stands over the NEXT arrow's 236 to 270; the director's
+  staged `battery` shows it there).
+- **The ADVANCED page's touch sitting is unmeasured on the glass.** Its
+  limits are pixels set on the 1.8's 322 ppi, and stand about 2.25 times
+  larger on the CYD's 143: a map may move the glass's edges up to 80 px, a
+  sitting whose presses lie more than 20 px (rms) off its fitted map is
+  refused, the check cross takes a press within 36 px, and the corner
+  crosses stand 48 and 40 px in from the edges (`common/advanced.c`). A
+  sitting on the board is the test.
 - **A power cut, or the RESET button, loses the time** (it resets the chip's
   RTC timer too): the clock starts again from the save's stamp (or the
   build time, if that is later), and that absence is not lived through.
@@ -984,7 +1031,25 @@ upstream's text but for one block.
    - upstream's selftests place pieces at fixed x on a 448 px floor: one
      past where the CYD's 320 px floor clamps it fails as a spot that "did
      not take". Give the CYD's share with `FLOOR_X()` or a branch of its
-     own in `sim/main.c`.
+     own in `sim/main.c`;
+   - a layout name upstream adds that pins a thing to its own glass:
+     v0.3.9.1's `MSP_FOOT_Y` put the milestones foot at y 326, off a 240 px
+     page. It needs a value in `render.h`'s 320 x 240 block, and a static
+     assert there to hold it;
+   - a whole page upstream adds in literals (v0.3.9.2's ADVANCED page):
+     every number becomes `UI(n)` or `UI_TEXT(s)`, and then every one of
+     its pages wants a look in the 320 x 240 world's snapshots;
+   - a page or a row for hardware the 320 x 240 boards lack is hidden there,
+     not scaled: v0.3.9.2's BATTERY row sets the AXP2101's charge current,
+     and drawn here it showed the 1.8's numbers and "set" a current nothing
+     applied (`ADV_BATTERY_ROW`);
+   - a hook upstream adds to its sleep path: the fork's `enter_dark`
+     returns before upstream's lines run, so it calls the hook itself
+     (v0.3.9.2's `adv_close`);
+   - an upstream selftest whose probe lands on something only the 320 x 240
+     layout overlaps: v0.3.9.1's probe above the milestones foot fell on
+     the sand dollar, and the battery pill stands over the NEXT arrow. A
+     branch in `sim/main.c` says which, and why.
 
 3. **The simulator, in all five worlds:**
 
