@@ -28,6 +28,7 @@
 #include "imu_port.h"
 #include "director.h"
 #include "update.h"
+#include "advanced.h"
 #include "update_mode.h"
 #include "net_time.h"
 #include <sys/time.h>
@@ -440,6 +441,7 @@ static void enter_sleep_for(int wake_after_s) {
              wake_after_s > 0 ? "deep sleep with the timer" : night_powers_off() ? (s_rtc ? "PMIC power-off (the PWR key boots it)" : "PMIC power-off (the PWR key boots it; the internet gives the time back)")
              : pwr_sensed() ? "deep sleep (the PWR key wakes; the clock runs on)" : "deep sleep (BOOT wakes)", pct0, mv0);
     touch_port_confirm_answer(-1);              /* an open reset prompt is a NO */
+    adv_close();                                /* ... the ADVANCED page goes (a sitting cut short keeps the saved map) */
     if (!progression_save(&tank))               /* never cancels: a tank that can't save (NVS down, a save that
                                                    wouldn't load) must still sleep, or the key goes dead */
         ESP_LOGE(TAG, "sleep: the tank save failed - sleeping anyway, the last good save stands");
@@ -662,6 +664,7 @@ static void dark_wait(int64_t us, int touch_int, bool light) {
 static void enter_dark(int wake_after_s, bool by_face) {
     int pct0 = battery_pct(), mv0 = battery_port_vbat_mv();
     touch_port_confirm_answer(-1);              /* an open reset prompt is a NO */
+    adv_close();                                /* ... the ADVANCED page goes, as in upstream's sleep (a sitting cut short keeps the saved map) */
     if (!progression_save(&tank))               /* if the cell dies in the dark, this save is the tank */
         ESP_LOGE(TAG, "dark: the tank save failed - going dark anyway, the last good save stands");
     bat_hist_save();                            /* the screen-on time so far */
@@ -749,6 +752,7 @@ static void enter_poweroff(void) {
 #endif
     ESP_LOGI(TAG, "power-off now: saving tank, PMIC soft cut (the PWR key boots)");
     touch_port_confirm_answer(-1);
+    adv_close();
     if (!progression_save(&tank))               /* never cancels (see enter_sleep_for) */
         ESP_LOGE(TAG, "power-off: the tank save failed - cutting anyway, the last good save stands");
     bat_hist_save();
@@ -779,11 +783,53 @@ static void pwr_key_poll(int64_t now) {
     if (k == 2) enter_poweroff(); else enter_sleep();
 }
 
+/* THE ADVANCED PAGE's two settings (0.3.9.2): NVS namespace "adv" - its own,
+ * like the battery history's, so a tank reset (which erases "tank") leaves
+ * them: the battery and the glass belong to the board, not to the fish.
+ * "cell" (u16 mAh; none or not in the list = the board's own cell) and
+ * "tfit" (the touch map, a touch_fit_t blob; none = the board's own map). */
+static void adv_load(void) {
+    nvs_handle_t h; uint16_t mah = 0; touch_fit_t f = TOUCH_FIT_NONE; size_t len = sizeof f;
+    if (nvs_open("adv", NVS_READONLY, &h) == ESP_OK) {
+        nvs_get_u16(h, "cell", &mah);
+        if (nvs_get_blob(h, "tfit", &f, &len) != ESP_OK || len != sizeof f) f = TOUCH_FIT_NONE;
+        nvs_close(h);
+    }
+    adv_init(mah, &f);
+    const touch_fit_t *k = adv_touch_fit();
+#if ADV_BATTERY_ROW
+    ESP_LOGI(TAG, "advanced: battery %d mAh%s, touch %s (x %.3f %+.1f, y %.3f %+.1f)", adv_cell(), adv_cell() == ADV_CELL_STOCK ? " (the board's own)" : "",
+             touch_fit_is_none(k) ? "the board's own map" : "THE KEEPER'S MAP", k->ax, k->bx, k->ay, k->by);
+#else   /* (this fork) a 320 x 240 board: no charger the firmware sets, so no size to name - the 1.8's would be read as this cell's */
+    ESP_LOGI(TAG, "advanced: touch %s (x %.3f %+.1f, y %.3f %+.1f); no battery row (no charger to set)",
+             touch_fit_is_none(k) ? "the board's own map" : "THE KEEPER'S MAP", k->ax, k->bx, k->ay, k->by);
+#endif
+    if (adv_cell() != ADV_CELL_STOCK) battery_port_set_cell(adv_cell());   /* the board's own: battery_port_init set it */
+}
+static void adv_save(int act) {
+    nvs_handle_t h; if (nvs_open("adv", NVS_READWRITE, &h) != ESP_OK) { ESP_LOGE(TAG, "advanced: NVS would not open - not saved"); return; }
+    esp_err_t e;
+    if (act == ADV_ACT_CELL) e = nvs_set_u16(h, "cell", (uint16_t)adv_cell());
+    else {
+        const touch_fit_t *f = adv_touch_fit();
+        e = touch_fit_is_none(f) ? nvs_erase_key(h, "tfit") : nvs_set_blob(h, "tfit", f, sizeof *f);
+        if (e == ESP_ERR_NVS_NOT_FOUND) e = ESP_OK;
+    }
+    if (e == ESP_OK) e = nvs_commit(h);
+    nvs_close(h);
+    if (e != ESP_OK) ESP_LOGE(TAG, "advanced: save failed: %s", esp_err_to_name(e));
+}
+
 /* BOOT: the RESET chord (2026-09-11) - while it is held, a finger landing on
  * the glass opens the confirm prompt; a finger already resting there doesn't
  * count. With no PMIC (so no PWR key) a short press, at RELEASE, is the sleep
- * key as it was until 2026-09-16; a chord press never is. */
+ * key as it was until 2026-09-16; a chord press never is.
+ * 0.3.9.2 (Strato, 2026-10-28: a keeper's child wiped their tank by accident):
+ * BOOT must be held ADV_BOOT_HOLD_S (5 s) BEFORE the finger lands - a finger
+ * landing sooner is an ordinary tap. And on the settings page the same chord
+ * opens the hidden ADVANCED page (common/advanced.h) instead of the prompt. */
 #define BTN_DEBOUNCE_US 50000
+#define BTN_CHORD_US ((int64_t)(ADV_BOOT_HOLD_S * 1000000))
 static void sleep_button_poll(int64_t now) {
     if (gpio_get_level(BTN_SLEEP)) {
         if (!s_pmic && s_btn_armed && s_btn_low_since && !s_btn_used && now - s_btn_low_since >= BTN_DEBOUNCE_US) {
@@ -793,10 +839,11 @@ static void sleep_button_poll(int64_t now) {
         s_btn_armed = true; s_btn_low_since = 0; s_btn_used = false;
     } else if (s_btn_armed) {
         if (!s_btn_low_since) s_btn_low_since = now;
-        else if (!s_btn_used && touch_port_pressed_since(s_btn_low_since) && !touch_port_confirm_up()) {
+        else if (!s_btn_used && now - s_btn_low_since >= BTN_CHORD_US && touch_port_pressed_since(s_btn_low_since + BTN_CHORD_US)
+                 && !touch_port_confirm_up() && !adv_up()) {
             s_btn_used = true;
-            ESP_LOGI(TAG, "BOOT + tap: reset prompt");
-            touch_port_confirm_open();
+            if (touch_port_settings()) { ESP_LOGI(TAG, "BOOT held %.0f s + tap on the settings page: the ADVANCED page", ADV_BOOT_HOLD_S); touch_port_open_advanced(); }
+            else { ESP_LOGI(TAG, "BOOT held %.0f s + tap: reset prompt", ADV_BOOT_HOLD_S); touch_port_confirm_open(); }
         }
     }
 }
@@ -828,6 +875,7 @@ static void on_tank_event(int ev, int fish, void *ud) {
     case TEV_WELCOME:     audio_port_play(SND_WELCOME, AUDIO_PITCH_ONE); break;
     case TEV_WHEEL_TICK:  audio_port_play(SND_WHEEL_TICK, AUDIO_PITCH_ONE); break;
     case TEV_CONFIRM:     audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE); break;
+    case TEV_CRAB_FIND:   audio_port_play(SND_CRAB_FIND, AUDIO_PITCH_ONE); break;
     default: break;
     }
 }
@@ -1000,6 +1048,12 @@ static void tank_task(void *arg) {
           else if (w == SET_TAP_ROTATE) ESP_LOGI(TAG, "settings: rotation %s", v ? (tank.orient_inv ? "LOCKED (turned over)" : "LOCKED (upright)") : "unlocked (the picture follows the tank)");
           else if (w == SET_TAP_FLIP) orientation_set(v != 0);              /* the CYD's SCREEN row (no IMU) */
           else if (w == SET_TAP_SLEEP) sleep_setting_set(v); }              /* the 320x240 boards' SLEEP row: NEVER / SCREEN / LIGHT */
+        { int a = touch_port_take_adv();                                /* the ADVANCED page: a size SET, a touch map kept or dropped */
+          if (a == ADV_ACT_CELL) { adv_save(a); battery_port_set_cell(adv_cell()); audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE); }
+          else if (a == ADV_ACT_FIT) { adv_save(a); audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE);
+              const touch_fit_t *f = adv_touch_fit();
+              ESP_LOGI(TAG, "advanced: touch %s (x %.3f %+.1f, y %.3f %+.1f)", touch_fit_is_none(f) ? "back to the board's own map" : "map kept", f->ax, f->bx, f->ay, f->by); } }
+        adv_tick(dt);
         if (touch_port_take_update() == UPD_TAP_CHECK) request_update();   /* the updates page's CHECK: save, restart into update mode */
         { int r = touch_port_take_shop();                               /* the shop's UNLOCK / MOVE / SELL / SHELVE / PUT BACK */
           if (r >= SHOP_TAP_PLACE) {                                    /* back from the shelf (0.3.9): the placement page, its old spot in place */
@@ -1036,7 +1090,7 @@ static void tank_task(void *arg) {
             batlog_add(battery_pct(), battery_port_vbat_mv(), display_port_brightness(), false, last_bat ? "" : "boot"); last_bat = now; } }
         int64_t pf_tick = esp_timer_get_time(); polls_us += pf_tick - now;
         tank.hold_light = setup_active() || touch_port_confirm_up();   /* no lights-out mid-name */
-        tank.ui_cover = tank.hold_light || touch_port_milestones() || touch_port_settings() || touch_port_updates() || touch_port_shop() || touch_port_battery();   /* a fry's spawning waits */
+        tank.ui_cover = tank.hold_light || touch_port_milestones() || touch_port_settings() || touch_port_updates() || touch_port_shop() || touch_port_battery() || adv_up();   /* a fry's spawning waits */
         tank_tick(&tank, dt, llm_ok ? advisor_llm_esp : advisor_rules);
         progression_tick(&tank, dt);
         battery_frame(now);
@@ -1077,7 +1131,7 @@ static void tank_task(void *arg) {
                19 fps with SETTINGS up, 25 without the hidden tank). The tank itself ticks on. No buffer holds
                the scene while a page is up, so none is "primed": the first tank frame after the page copies the
                scene itself. */
-            bool page = touch_port_milestones() || touch_port_settings() || touch_port_updates() || touch_port_shop();
+            bool page = touch_port_milestones() || touch_port_settings() || touch_port_updates() || touch_port_shop() || adv_up();
             if (page && !USE_RESTORE) render_fb_primed(NULL, 0);
             else if (!page) render_tank(&tank, fb[cur], TANK_W);
             touch_port_poll(&tank);          /* the CST816 is polled, not interrupt-
@@ -1086,7 +1140,10 @@ static void tank_task(void *arg) {
                                                 between 40 ms frame boundaries */
             int sel = touch_port_selected();
             int64_t tc = esp_timer_get_time();
-            if (touch_port_milestones()) {       /* milestones page: covers the tank until a tap */
+            if (adv_up()) {                       /* the ADVANCED page (0.3.9.2) */
+                adv_render(fb[cur], TANK_W);
+                sel = -1;
+            } else if (touch_port_milestones()) {       /* milestones page: covers the tank until a tap */
                 render_milestones(&tank, fb[cur], TANK_W);
                 sel = -1;
             } else if (touch_port_settings()) {  /* settings page: brightness + volume */
@@ -1113,7 +1170,7 @@ static void tank_task(void *arg) {
             if (sel >= 0) render_stats_card(&tank, sel, fb[cur], TANK_W);   /* tapped fish: stats card (+ the pill) */
             {   /* the battery pill: with a card, while low, and a few seconds after the cable goes in;
                    the battery page (a tap on the pill) over the live tank in its place */
-                bool pages = touch_port_milestones() || touch_port_settings() || touch_port_updates() || touch_port_shop() || setup_active() || touch_port_confirm_up();
+                bool pages = touch_port_milestones() || touch_port_settings() || touch_port_updates() || touch_port_shop() || setup_active() || touch_port_confirm_up() || adv_up();
                 bool bpage = touch_port_battery() && s_bat_ok && !pages;
                 bool pill = s_bat_ok && !pages && !bpage && (sel >= 0 || s_bat_low || now < s_bat_popup_us);
                 if (bpage) {
@@ -1124,7 +1181,7 @@ static void tank_task(void *arg) {
                 if (!pages && !bpage) render_tool_chip(&tank, sel, fb[cur], TANK_W);   /* a tool in hand: the chip (2026-10-01) */
                 touch_port_set_pill(pill);
             }
-            if (!touch_port_milestones() && !touch_port_settings() && !touch_port_updates() && !touch_port_shop()) {   /* an announcement over the live tank */
+            if (!touch_port_milestones() && !touch_port_settings() && !touch_port_updates() && !touch_port_shop() && !adv_up()) {   /* an announcement over the live tank */
                 const notice_t *nt = notice_current();
                 if (nt) render_notice(&tank, fb[cur], TANK_W, nt->kind, nt->fish, nt->bit, 1.0f - nt->age / NOTICE_UP_S);
             }
@@ -1328,6 +1385,7 @@ void app_main(void) {
     }
     touch_port_init();
     s_pmic = battery_port_init(board_i2c_bus());
+    adv_load();                       /* the keeper's battery size and touch map (the hidden ADVANCED page, 0.3.9.2) */
     if (!board_has_expander()) {      /* not positively the 1.8: on the round board A3V3 feeds the ES7210 whole,
                                          and off, it clamps the I2C bus (battery_port.h) - never cut it on a guess */
         battery_port_pin_rail("aldo1");

@@ -19,6 +19,8 @@ static bool s_set;
 bool touch_port_settings(void) { return s_set; }
 void touch_port_show_settings(bool on) { s_set = on; }
 int  touch_port_take_setting(int *value) { (void)value; return 0; }
+void touch_port_open_advanced(void) {}
+int  touch_port_take_adv(void) { return 0; }
 static bool s_shop;
 bool touch_port_shop(void) { return s_shop; }
 void touch_port_show_shop(bool on) { s_shop = on; }

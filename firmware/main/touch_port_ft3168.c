@@ -31,6 +31,7 @@
 #include "render.h"
 #include "setup.h"
 #include "notice.h"
+#include "advanced.h"
 #include "audio_port.h"
 #include "progression.h"
 #include "tank_events.h"
@@ -59,6 +60,7 @@ static bool s_back;                               /* the settings page's CLOSE j
                                                      release must not reach the page as a tap on ITS CLOSE (same spot) */
 static int  s_shop_act;                           /* an UNLOCK / MOVE / SELL tapped: the raw tap code, for main (one-shot) */
 static bool s_held_page;                          /* this press opened a piece's page by holding on it (2026-09-24) */
+static int  s_adv_act;                            /* the ADVANCED page's CELL / FIT, for main (one-shot) */
 static int  s_set_what, s_set_val;                /* a segment tapped: SET_TAP_* + value, for main */
 static bool s_pill;                               /* main.c drew the battery pill this frame: a tap on it is its page's */
 static bool s_bat; static int64_t s_bat_us;       /* the battery page up, and since when (it closes itself) */
@@ -477,6 +479,7 @@ static void map_touch(uint16_t px, uint16_t py, float *tx, float *ty) {
     if (ry < s_raw_y0) s_raw_y0 = ry;
     if (ry > s_raw_y1) s_raw_y1 = ry;
     cal_view((float)rx, (float)ry, tx, ty);
+    touch_fit_apply(adv_touch_fit(), tx, ty, s_inverted);   /* the keeper's own map (0.3.9.2, the ADVANCED page): none unless one was kept */
 }
 /* The STROKE's reach to the glass (2026-10-01). The panel's report runs out
  * before the glass does: its raw 0..max lands, through the map above, on x
@@ -597,6 +600,12 @@ void touch_port_poll(tank_t *t) {
         else if (r == SET_TAP_BRIGHT || r == SET_TAP_BRIGHT_LIVE || r == SET_TAP_VOLUME || r == SET_TAP_LIGHT || r == SET_TAP_IDLE || r == SET_TAP_FEED || r == SET_TAP_ROTATE
                  || r == SET_TAP_FLIP || r == SET_TAP_SLEEP) { s_set_what = r; s_set_val = v; }   /* FLIP, SLEEP: the 320x240 boards' rows */
     }
+    if (adv_up() && !s_cf && !su) {                          /* the ADVANCED page (0.3.9.2): its taps, the crosses, the check */
+        int r = adv_touch(tx, ty, touched, s_inverted);
+        if (r == ADV_ACT_BACK) { s_set = true; s_back = true; ESP_LOGI(TAG, "advanced: BACK -> settings"); }
+        else if (r == ADV_ACT_TICK) tank_emit(TEV_WHEEL_TICK, -1);
+        else if (r) s_adv_act = r;                           /* main saves it (and tells the charger) */
+    }
     if (s_upd && !s_cf && !su) {                             /* the UPDATES page: CHECK (main restarts), FORGET, CLOSE */
         int r = updates_page_touch(tx, ty, touched);
         if (r == UPD_TAP_CLOSE) { s_upd = false; s_set = true; s_back = true; ESP_LOGI(TAG, "updates page: CLOSE -> settings"); }
@@ -616,7 +625,7 @@ void touch_port_poll(tank_t *t) {
     }
     { int rf = setup_take_renamed();                         /* a rename closed (2026-10-01): back to the milestones page, the fish's card up */
       if (rf >= 0) { s_ms = true; s_set = false; s_shop = false; s_sel = -1; render_milestones_show_fish(t, rf); } }
-    bool modal = s_ms || s_set || s_shop || s_cf || su || s_bat || s_upd;   /* a page or a prompt owns the glass */
+    bool modal = s_ms || s_set || s_shop || s_cf || su || s_bat || s_upd || adv_up();   /* a page or a prompt owns the glass */
     if (touched) {                                           /* stroke = wipe/slash, reaching the glass (stroke_point above) */
         float dx, dy; stroke_point(!s_down, tx, ty, &dx, &dy);
         if (!s_down) { s_dx0 = s_dx1 = dx; s_frames = 0; s_raw_px = x[0]; s_raw_py = y[0]; }
@@ -664,7 +673,7 @@ void touch_port_poll(tank_t *t) {
         if (held_us < 350000 && dx * dx + dy * dy < 24 * 24) {
             if (notice_current()) {                                 /* (the lights-out notice lets its tap through: notice.h) */
                 bool took = notice_dismiss(); ESP_LOGI(TAG, "tap %s the announcement", notice_current() ? "held by" : "closed"); if (took) goto released; }
-            if (s_set || s_upd || s_back) { s_back = false; goto released; }   /* the settings / updates page had the glass (their touch calls above) */
+            if (s_set || s_upd || s_back || adv_up()) { s_back = false; goto released; }   /* the settings / updates page had the glass (their touch calls above) */
             if (s_shop) {                                           /* the shop: a row's modal, UNLOCK, HOW TO EARN, CLOSE */
                 int r = render_shop_tap(t, s_px, s_py);
                 ESP_LOGI(TAG, "shop tap at %.0f,%.0f -> %s", s_px, s_py, r == SHOP_TAP_CLOSE ? "CLOSE" : r >= SHOP_TAP_PLACE ? "PUT BACK" : r >= SHOP_TAP_SHELVE ? "SHELVE" : r >= SHOP_TAP_FRY ? "BUY A FRY" : r >= SHOP_TAP_SELL ? "SELL" : r >= SHOP_TAP_MOVE ? "MOVE" : r >= SHOP_TAP_BUY ? "UNLOCK" : r == SHOP_TAP_KEPT ? "modal" : "nothing");
@@ -776,7 +785,9 @@ void touch_port_poll(tank_t *t) {
         else if (s_ms && !s_back && fabsf(dx) >= 40 && fabsf(dx) > 2 * fabsf(dy)) {   /* sideways along the TANK row: its page (2026-09-30) */
             if (render_milestones_swipe(t, s_px, s_py, dx)) ESP_LOGI(TAG, "page swipe %.0f px on the tank row", dx);
         }
-        else if (!s_ms && t->tool == TOOL_HAND && s_py - tank_glass_top(s_px) < 60 && dy >= 40) tank_feed(t, s_lx, 3);  /* drag down from the top = feed (not with a tool in hand) */
+        else if (!modal && !s_back && t->tool == TOOL_HAND && s_py - tank_glass_top(s_px) < 60 && dy >= 40) tank_feed(t, s_lx, 3);  /* drag down from the top = feed (not with a tool in hand,
+                                                                  never under a page: 0.3.9.1, a keeper fed the tank from the SETTINGS page - a tap at its top that slid
+                                                                  40 px read as this drag, and only the keeper page held it off) */
     }
 released:
     if (!touched) s_held_page = false;
@@ -789,7 +800,7 @@ released:
 int touch_port_selected(void) { return s_sel; }
 bool touch_port_milestones(void) { return s_ms; }
 void touch_port_show_milestones(bool on) { if (s_ms && !on) render_milestones_leave(); s_ms = on; }
-void touch_port_dismiss(void) { s_sel = -1; if (s_ms) render_milestones_leave(); if (s_shop) render_shop_leave(); s_ms = false; s_set = false; s_shop = false; s_bat = false; s_upd = false; }
+void touch_port_dismiss(void) { adv_close(); s_sel = -1; if (s_ms) render_milestones_leave(); if (s_shop) render_shop_leave(); s_ms = false; s_set = false; s_shop = false; s_bat = false; s_upd = false; }
 bool touch_port_updates(void) { return s_upd; }
 void touch_port_show_updates(bool on) { s_upd = on; if (on) { s_ms = false; s_set = false; s_shop = false; s_sel = -1; s_bat = false; } }
 int  touch_port_take_update(void) { int r = s_upd_act; s_upd_act = 0; return r; }
@@ -814,6 +825,8 @@ float touch_port_confirm_frac(void) {
 int  touch_port_confirm_take(void)  { int a = s_cf_ans; s_cf_ans = 0; return a; }
 bool touch_port_pressed_since(int64_t us) { return s_down && s_press_us > us; }
 bool touch_port_settings(void) { return s_set; }
+void touch_port_open_advanced(void) { s_set = false; render_settings_cancel(); adv_open(); ESP_LOGI(TAG, "ADVANCED page up"); }
+int  touch_port_take_adv(void) { int r = s_adv_act; s_adv_act = 0; return r; }
 void touch_port_show_settings(bool on) { s_set = on; if (on) { s_ms = false; s_sel = -1; s_bat = false; } }
 int  touch_port_take_setting(int *value) { int w = s_set_what; *value = s_set_val; s_set_what = 0; return w; }
 bool touch_port_shop(void) { return s_shop; }

@@ -19,7 +19,7 @@ const char *const GOAL_NAMES[GOAL_COUNT] = {
 /* ---- the event bus (tank_events.h): one listener, synchronous ---- */
 const char *const TANK_EVENT_NAMES[TEV_COUNT] = {
     "tap", "feed", "light_on", "light_off", "wipe", "snip", "eat", "spook", "investigate", "bubbles",
-    "welcome", "wheel_tick", "confirm",
+    "welcome", "wheel_tick", "confirm", "crab_find",
 };
 static tank_event_fn s_ev_fn; static void *s_ev_ud;
 void tank_events_set(tank_event_fn fn, void *ud) { s_ev_fn = fn; s_ev_ud = ud; }
@@ -408,8 +408,9 @@ void tank_init(tank_t *t, uint32_t seed) {
     t->urchin_x = -1; t->urchin_bed = t->urchin_frond = -1; t->urchin_appetite = 0; t->urchin_chew = 0;
     t->urchin_to = -1; t->urchin_rest = 0; t->urchin_grazed_px = 0; t->urchin_front = false; t->urchin_dy = 0;   /* behind, as it always was, until its first move rolls a lane */
     t->cr_x = -1; t->cr_y = 0; t->cr_tilt = 0; t->cr_facing = 1; t->cr_variant = 0; t->cr_mode = CR_REST; t->cr_mode_s = 0; t->cr_poke = 0; t->cr_eaten = 0; t->cr_fidget_kind = CR_FID_NONE; t->cr_fidget = 0; t->cr_next_fidget = 2; t->cr_shuffle_to = -1; t->cr_taps = 0; t->cr_tap_t = -100; t->cr_scurry = false; t->cr_hide = 0; t->cr_back = 0; t->cr_cave = -1; t->cr_food = -1; t->cr_side = 1;
-    t->cr_to = -1; t->cr_timer = 0; t->cr_gait = 0; t->cr_climb = 0; t->cr_outing = 0; t->cr_since_climb = 0;
+    t->cr_to = -1; t->cr_timer = 0; t->cr_gait = 0; t->cr_climb = 0; t->cr_outing = 0; t->cr_since_climb = 0; t->cr_nibble = 0; t->cr_nibble_i = 0;
     t->cr_startle_cool = 0; t->cr_find = 0; t->cr_find_cool = 0; t->cr_found = 0; t->cr_found_paid = 0; t->cr_was_night = false; t->cr_stood = false; t->cr_lane_front = true; t->cr_next_dig = false;
+    t->cr_claim = -1; t->cr_shoo = 0; t->cr_meals = 0; t->cr_full = 0; t->shrimp_fp = -1; t->shrimp_flee = 0; t->shrimp_avoid_x = 0; t->shrimp_avoid_s = 0;
     t->sh_x = -1; t->sh_y = 0; t->sh_bed = t->sh_frond = -1; t->sh_mode = SH_DRIFT; t->sh_facing = 1;
     t->sh_akind = SH_ANCHOR_NONE; t->sh_aitem = -1; t->sh_ax = t->sh_ay = t->sh_ahw = t->sh_aref = 0; t->sh_front = false;
     t->sh_hitched = t->sh_credited = false; t->sh_tx = t->sh_ty = 0; t->sh_stay = 0; t->sh_look = 0; t->sh_vx = t->sh_vy = 0;
@@ -1269,15 +1270,20 @@ static void urchin_sleep(tank_t *t, float seconds) {
 #define CR_WALK_LO      25.0f    /* px, a short walk */
 #define CR_WALK_HI      90.0f
 #define CR_OUTING_S     300.0f   /* ~5 min out, then a shelter (Strato: out of the castle too long) */
-#define CR_ROOST_S_LO   600.0f   /* 10..30 min roosting; x2 with the light off */
+#define CR_ROOST_S_LO   600.0f   /* 10..30 min roosting; halved with the light off (CR_NIGHT_OUT) */
 #define CR_ROOST_S_HI   1800.0f
 #define CR_EAT_S        7.0f
-#define CR_REACH        12.0f    /* a pellet this far ahead of its middle is under its claw */
+static void shrimp_scatter(tank_t *t, float x, float y, float radius);   /* below, with the shrimp */
 #define CR_CLIMB_EVERY_S (3 * 3600.0f)
 #define CR_CLIMB_S      75.0f    /* each way */
 #define CR_TOP_S        25.0f
-#define CR_OVER_DX      24.0f    /* a fish this near over its middle: claws up for CR_OVER_S, once per CR_OVER_COOL_S (Strato 10-24) */
-#define CR_OVER_DY      34.0f
+#define CR_SLOPE_W      4        /* the climb's footing and slope: the silhouette averaged this many cells either side (0.3.9.1) */
+#define CR_CLIMB_EASE   12.0f    /* ... and eased toward, per second: ~95% of a change in a quarter second */
+#define CR_OVER_DX      36.0f    /* a fish this near it sideways ... (Strato 10-24; 24 until 0.3.9.1) */
+#define CR_OVER_DY      60.0f    /* ... and from CR_OVER_LOW under its middle (a fish down on the sand beside it, eating) to this far over it:
+                                    claws up for CR_OVER_S, once per CR_OVER_COOL_S. 0.3.9 asked for a fish 0..34 px OVER its middle alone, a band
+                                    fish almost never cross (2 times an hour in a lived-in sim tank; Strato never saw it on the glass) */
+#define CR_OVER_LOW     14.0f
 #define CR_OVER_S       1.0f
 #define CR_OVER_COOL_S  20.0f
 #define CR_NIGHT_OUT    3.0f     /* a night crab: outings this many times longer with the light off, roosts half as long */
@@ -1343,6 +1349,10 @@ static int crab_cave(const tank_t *t) {
     }
     return best;
 }
+/* a find is due (0.3.9.1): the wait is over, none held up, the light on and the keeper here (tank.h CR_FIND_PRESENT_S) */
+static bool crab_find_due(const tank_t *t) {
+    return t->cr_find_cool <= 0 && t->cr_find <= 0 && !t->night && t->idle_s < CR_FIND_PRESENT_S;
+}
 static void crab_set_walk(tank_t *t, float to, int mode) {
     float sx;
     if (mode == CR_WALK && t->cr_cave < 0 && crab_snail_x(t, &sx) && fabsf(to - sx) < CR_SNAIL_GAP) to = t->cr_x - (to - t->cr_x);   /* not onto the snail: the other way */
@@ -1351,11 +1361,38 @@ static void crab_set_walk(tank_t *t, float to, int mode) {
     /* its lane for the walk and the stop (tank.h THE LANES): rolled in the clear; a walk that will end in a dig
        takes the front lane (a dig is always in front); inside a piece's footprint the lane holds, and a dig
        that would need the other lane waits for the next stop */
-    const bool dig = tank_randf(t, 0, 1) < 0.6f; const float r = tank_randf(t, 0, 1);   /* both rolls always drawn: the RNG's run is the same with or without a piece */
+    const bool dig = tank_randf(t, 0, 1) < 0.6f || crab_find_due(t); const float r = tank_randf(t, 0, 1);   /* both rolls always drawn: the RNG's run is the same with or without a piece;
+                                                                                                                 a find due: a dig, always */
     t->cr_next_dig = mode == CR_WALK && t->cr_cave < 0 && dig;
     if (tank_floor_clear(t, t->cr_x, CR_HALF_W)) t->cr_lane_front = t->cr_next_dig || r < LANE_FRONT_ODDS;
     else if (!t->cr_lane_front) t->cr_next_dig = false;
     crab_mode(t, mode);
+}
+/* going for pellet f: a shrimp of the school after it, on the sand within CR_SHOO_PX of its body's edge - claws up, the
+   shrimp near it flee, the pellet is the crab's (tank.h, THE CRAB'S PELLET above). True when it shooed them. */
+static bool crab_shoo(tank_t *t, int f) {
+    if (!(t->sd_unlocks & SD_ITEM_SHRIMP) || t->shrimp_fp != f) return false;
+    for (int i = 0; i < t->shrimp_n; i++) {
+        const shrimp_t *q = &t->shrimp[i];
+        if (FOOD_FLOOR_Y - q->y > CR_SHOO_BAND || fabsf(q->x - t->cr_x) - CR_HALF_W > CR_SHOO_PX) continue;
+        t->cr_claim = (int8_t)f; t->cr_shoo = CR_SHOO_S; t->cr_poke = CR_SHOO_POKE;
+        shrimp_scatter(t, t->cr_x, FOOD_FLOOR_Y - 4, CR_HALF_W + 30);   /* the ones at it dart off tail first; the school leaves the pellet */
+        t->shrimp_fp = -1;
+        /* ... and keeps off: its next goal well past the crab on their side, held while the crab walks on and eats (a half-second
+           dart alone sent them straight back through its shell - Strato on the square: "it did not look that way") */
+        float sx = 0; for (int j = 0; j < t->shrimp_n; j++) sx += t->shrimp[j].x;
+        float away = sx / t->shrimp_n >= t->cr_x ? 1.0f : -1.0f, go = tank_randf(t, CR_SHOO_AWAY_LO, CR_SHOO_AWAY_HI);
+        const float zx = t->food[f].x, reach = fmaxf(CR_SHOO_AWAY_LO, CR_SHOO_ZONE_PX + 20);
+        if ((away > 0 ? TANK_FX1 - 40 - fmaxf(t->cr_x, zx) : fminf(t->cr_x, zx) - (TANK_FX0 + 40)) < reach) away = -away;   /* no room that side: the other */
+        t->shrimp_tx = clampf((away > 0 ? fmaxf(t->cr_x, zx) : fminf(t->cr_x, zx)) + away * fmaxf(go, CR_SHOO_ZONE_PX + 20), TANK_FX0 + 40, TANK_FX1 - 40);
+        t->shrimp_avoid_side = (int8_t)away;
+        t->shrimp_ty = FOOD_FLOOR_Y - tank_randf(t, 14, 30);
+        t->shrimp_tt = tank_randf(t, CR_SHOO_KEEP_LO_S, CR_SHOO_KEEP_HI_S);
+        t->shrimp_flee = CR_SHOO_FLEE_S;
+        t->shrimp_avoid_x = t->food[f].x; t->shrimp_avoid_s = CR_SHOO_ZONE_S;
+        return true;
+    }
+    return false;
 }
 /* a step toward x at a crab's pace, facing that way; true once there */
 static bool crab_step(tank_t *t, float to, float dt) {
@@ -1458,6 +1495,9 @@ static void crab_tick(tank_t *t, float dt) {
     if (t->cr_x < 0) tank_crab_place(t);
     t->cr_since_climb += dt; t->cr_mode_s += dt;
     if (t->cr_poke > 0) t->cr_poke -= dt;
+    if (t->cr_full > 0) t->cr_full -= dt;
+    if (t->cr_claim >= 0 && (!t->food[t->cr_claim].alive || t->cr_food != t->cr_claim || (t->cr_mode != CR_FEED && t->cr_mode != CR_EAT)))
+        t->cr_claim = -1;                                             /* eaten, gone, or it went off: the shrimp may have it */
     if (t->cr_hide > 0) t->cr_hide = t->cr_mode == CR_ROOST ? t->cr_hide - dt : 0;
     {   /* backing into the dark and coming out again: a motion, never a switch (Strato 10-24, the square: "it looked more
            like a light turned off"); the hide holds it back, its end lets it forward */
@@ -1467,7 +1507,7 @@ static void crab_tick(tank_t *t, float dt) {
         else if (t->cr_back > to) { t->cr_back -= step; if (t->cr_back < to) t->cr_back = to; }
     }
     if (t->cr_startle_cool > 0) t->cr_startle_cool -= dt;
-    if (t->cr_find <= 0) t->cr_find_cool -= dt;                       /* the wait for the next find runs on awake time */
+    if (t->cr_find <= 0 && t->cr_find_cool > 0) t->cr_find_cool = fmaxf(0, t->cr_find_cool - dt);   /* the wait for the next find (tank_tick_sleep runs it asleep) */
     if (t->cr_mode != CR_ROOST && t->cr_mode != CR_SHELTER && t->cr_mode != CR_CLIMB) t->cr_outing += dt;
     /* a night crab (Strato 10-24): the light going off brings it out of its roost soon; the light coming on
        sends it in soon (both at a crab's pace: a minute or two, never on the switch) */
@@ -1484,7 +1524,7 @@ static void crab_tick(tank_t *t, float dt) {
         for (int i = 0; i < t->n_fish; i++) {
             const fish_t *f = &t->fish[i];
             float dy = my - f->y;
-            if (fabsf(f->x - t->cr_x) < CR_OVER_DX && dy > 0 && dy < CR_OVER_DY) { t->cr_poke = CR_OVER_S; t->cr_startle_cool = CR_OVER_COOL_S; break; }
+            if (fabsf(f->x - t->cr_x) < CR_OVER_DX && dy > -CR_OVER_LOW && dy < CR_OVER_DY) { t->cr_poke = CR_OVER_S; t->cr_startle_cool = CR_OVER_COOL_S; break; }
         }
     }
     /* its feet on its shelter's own floor line (a piece IN FRONT stands 7 px lower than the open sand): eased, never a jump */
@@ -1499,7 +1539,7 @@ static void crab_tick(tank_t *t, float dt) {
     }
     /* food on the floor comes first (Strato: "it should come out for food when food reaches the ground") - but not
        from the dark it just ran into, and not with a sand dollar in its claw */
-    if (t->cr_mode != CR_CLIMB && t->cr_mode != CR_EAT && t->cr_mode != CR_FEED && !t->cr_scurry && t->cr_hide <= 0 && t->cr_find <= 0) {
+    if (t->cr_mode != CR_CLIMB && t->cr_mode != CR_EAT && t->cr_mode != CR_FEED && !t->cr_scurry && t->cr_hide <= 0 && t->cr_find <= 0 && t->cr_full <= 0) {   /* (full: CR_MEALS_FULL) */
         int f = crab_pellet(t);
         if (f >= 0) { t->cr_food = (int8_t)f; t->cr_cave = -1; crab_set_walk(t, t->food[f].x - CR_REACH * (t->food[f].x > t->cr_x ? 1 : -1), CR_FEED); }
     }
@@ -1507,18 +1547,28 @@ static void crab_tick(tank_t *t, float dt) {
     case CR_FEED: {
         int f = t->cr_food;
         if (f < 0 || !t->food[f].alive) { t->cr_food = -1; crab_stop(t); return; }
+        if (t->cr_shoo > 0) { t->cr_shoo -= dt; return; }              /* claws up at the shrimp: it stands its ground a beat */
+        if (t->cr_claim != f && crab_shoo(t, f)) return;
         t->cr_to = clampf(t->food[f].x - CR_REACH * (t->food[f].x > t->cr_x ? 1 : -1), crab_lo(), crab_hi());
-        if (crab_advance(t, dt) || fabsf(t->food[f].x - t->cr_x) <= CR_REACH + 2) { t->cr_facing = t->food[f].x > t->cr_x ? 1 : -1; crab_mode(t, CR_EAT); t->cr_timer = CR_EAT_S; }
+        if (crab_advance(t, dt) || fabsf(t->food[f].x - t->cr_x) <= CR_REACH + 2) {
+            t->cr_facing = t->food[f].x > t->cr_x ? 1 : -1; crab_mode(t, CR_EAT); t->cr_timer = CR_EAT_S;
+            t->cr_claim = (int8_t)f;                                   /* in its claw: not the shrimp's */
+        }
         return; }
     case CR_EAT: {
         int f = t->cr_food;
         if (f < 0 || !t->food[f].alive) { t->cr_food = -1; crab_stop(t); return; }
         t->food[f].nibbled += dt; t->cr_timer -= dt;
-        if (t->cr_timer <= 0) { t->food[f].alive = false; t->cr_food = -1; if (t->cr_eaten < 65535) t->cr_eaten++; crab_stop(t); }
+        if (t->cr_timer <= 0) {
+            t->food[f].alive = false; t->cr_food = -1; if (t->cr_eaten < 65535) t->cr_eaten++;
+            if (++t->cr_meals >= CR_MEALS_FULL) { t->cr_meals = 0; t->cr_full = tank_randf(t, CR_FULL_LO_S, CR_FULL_HI_S); }   /* full a while */
+            crab_stop(t);
+        }
         return; }
     case CR_ROOST:
         crab_fidget(t, dt);
         t->cr_timer -= dt;
+        if (crab_find_due(t) && t->cr_hide <= 0 && t->cr_timer > CR_FIND_COME_S) t->cr_timer = CR_FIND_COME_S;   /* a find due, the keeper here: it comes out to dig */
         if (t->cr_cave >= 0 && !tank_decor_in(t, t->cr_cave)) { t->cr_cave = -1; t->cr_timer = 0; }   /* the keeper took the piece away: it is on the open sand */
         if (t->cr_timer <= 0) { t->cr_cave = -1; t->cr_outing = 0; crab_set_walk(t, t->cr_x + tank_randf(t, CR_WALK_LO, CR_WALK_HI) * (tank_randf(t, 0, 1) < 0.5f ? -1 : 1), CR_WALK); }
         return;
@@ -1532,20 +1582,36 @@ static void crab_tick(tank_t *t, float dt) {
         }
         return;
     case CR_CLIMB: {
+        /* THE CLIMB, smoothed (0.3.9.1; Strato 2026-10-24 after a staged one on his 1.8: "still jerky ... smooth that journey
+           out. Have it stop along the way and nibble the volcanic rocks"). Until then its footing, height and tilt were read off
+           tank_volcano_half ROW BY ROW - every jagged boulder edge (the silhouette's 4-cell hash step, its sines) turned the whole
+           crab at once. Now: the rock under it is a silhouette averaged over CR_SLOPE_W cells either side, the slope the difference
+           of the two halves of that window, and footing, height and tilt all EASE toward their targets (CR_CLIMB_EASE a second).
+           Three stops on the way (CR_NIBBLE_AT: two up, one down): the climb waits CR_NIBBLE_S while it turns to the rock and
+           nibbles (render: the dig's pick against the rock, moss on the claw). */
         const float vx = tank_decor_x(t, 9), fy = tank_decor_fy(t, 9);
-        if (!tank_decor_in(t, 9)) { t->cr_y = 0; t->cr_tilt = 0; t->cr_climb = 0; crab_stop(t); return; }
-        t->cr_climb += dt / CR_CLIMB_S;
+        if (!tank_decor_in(t, 9)) { t->cr_y = 0; t->cr_tilt = 0; t->cr_climb = 0; t->cr_nibble = 0; crab_stop(t); return; }
         const float top = CR_TOP_S / CR_CLIMB_S;
+        static const float CR_NIBBLE_AT[3] = { 0.30f, 0.64f, 1.0f + 25.0f / 75.0f + 0.48f };                  /* (the last: half way down; CR_TOP_S / CR_CLIMB_S inline) */
+        if (t->cr_nibble > 0) {                                                                               /* a stop: nibbling */
+            t->cr_nibble -= dt;
+            if (t->cr_nibble < 0) t->cr_nibble = 0;
+        } else {
+            t->cr_climb += dt / CR_CLIMB_S;
+            if (t->cr_nibble_i < 3 && t->cr_climb >= CR_NIBBLE_AT[t->cr_nibble_i]) { t->cr_nibble = CR_NIBBLE_S; t->cr_nibble_i++; }
+            if (t->cr_climb < 1 || t->cr_climb >= 1 + top) t->cr_gait += 3.0f * dt;                          /* striding up and down; still at the top and at a stop */
+        }
         float up = t->cr_climb < 1 ? t->cr_climb : t->cr_climb < 1 + top ? 1 : 2 + top - t->cr_climb;
-        if (t->cr_climb < 1 || t->cr_climb >= 1 + top) t->cr_gait += 3.0f * dt;                              /* striding up and down; still at the top */
-        if (up <= 0 && t->cr_climb > 1) { t->cr_y = 0; t->cr_tilt = 0; t->cr_climb = 0; t->cr_since_climb = 0; crab_stop(t); return; }
-        float py = VOLCANO_BASE_CELL + up * (VOLCANO_TOP_CELL - 10 - VOLCANO_BASE_CELL);                      /* its height in cells: the near rim, under the far rim's top */
-        float half = tank_volcano_half(py, t->cr_side), half2 = tank_volcano_half(py + 1, t->cr_side);
-        t->cr_x = vx + t->cr_side * half * 2.0f;                                                              /* its footing: ON the rock's surface */
-        t->cr_y = (CR_FLOOR_Y) - (fy - py * 2.0f);                                                            /* over CR_FLOOR_Y */
-        float run = (half - half2) * 2.0f; if (run < 0) run = 0;                                              /* the flank's run per 2 px of rise */
-        t->cr_tilt = atan2f(t->cr_side * 2.0f, run);                                                          /* its underside against the slope (render) */
-        t->cr_facing = (t->cr_climb < 1) ? -t->cr_side : t->cr_side;                                          /* up: toward the axis; down: away */
+        if (up <= 0 && t->cr_climb > 1) { t->cr_y = 0; t->cr_tilt = 0; t->cr_climb = 0; t->cr_nibble = 0; t->cr_since_climb = 0; crab_stop(t); return; }
+        const float py = VOLCANO_BASE_CELL + up * (VOLCANO_TOP_CELL - 10 - VOLCANO_BASE_CELL);                /* its height in cells: the near rim, under the far rim's top */
+        float lo = 0, hi = 0, all = 0;                                                                        /* the rock, smoothed: CR_SLOPE_W cells below and above */
+        for (int k = 1; k <= CR_SLOPE_W; k++) { lo += tank_volcano_half(py - k, t->cr_side); hi += tank_volcano_half(py + k, t->cr_side); }
+        all = (lo + hi + tank_volcano_half(py, t->cr_side)) / (2 * CR_SLOPE_W + 1); lo /= CR_SLOPE_W; hi /= CR_SLOPE_W;
+        float run = (lo - hi) * 2.0f / (CR_SLOPE_W + 1); if (run < 0) run = 0;                                /* the flank's run per 2 px of rise, over the window */
+        const float tx = vx + t->cr_side * all * 2.0f, ty = (CR_FLOOR_Y) - (fy - py * 2.0f), tt = atan2f(t->cr_side * 2.0f, run);
+        const float a = 1 - expf(-CR_CLIMB_EASE * dt);                                                        /* the ease: most of the way in a quarter second */
+        t->cr_x += (tx - t->cr_x) * a; t->cr_y += (ty - t->cr_y) * a; t->cr_tilt += (tt - t->cr_tilt) * a;
+        t->cr_facing = t->cr_nibble > 0 ? -t->cr_side : (t->cr_climb < 1) ? -t->cr_side : t->cr_side;         /* up and nibbling: toward the rock; down: away */
         return; }
     case CR_DIG:
     case CR_REST:
@@ -1554,13 +1620,19 @@ static void crab_tick(tank_t *t, float dt) {
             if (t->cr_find <= 0) { t->cr_find = 0; t->cr_find_cool = tank_randf(t, CR_FIND_MISSED_LO_S, CR_FIND_MISSED_HI_S); }   /* untaken: buried again, another chance sooner */
             return;
         }
-        if (t->cr_mode == CR_DIG && t->cr_find_cool <= 0) {                                                   /* the pick comes up with a SAND DOLLAR (render: held up over the fronds) */
+        if (t->cr_mode == CR_DIG && crab_find_due(t)) {                                                       /* the pick comes up with a SAND DOLLAR (render: held up over the fronds) */
             float u = fmodf(t->cr_mode_s, CR_PICK_S) / CR_PICK_S;
-            if (u >= 0.42f && u < 0.5f) { t->cr_find = CR_FIND_HOLD_S; t->cr_fidget_kind = CR_FID_NONE; t->cr_fidget = 0; t->cr_poke = 0; return; }
+            if (u >= 0.42f && u < 0.5f) { t->cr_find = CR_FIND_HOLD_S; t->cr_fidget_kind = CR_FID_NONE; t->cr_fidget = 0; t->cr_poke = 0; tank_emit(TEV_CRAB_FIND, -1); return; }   /* (its cue, 0.3.9.1) */
         }
         crab_fidget(t, dt);
         t->cr_timer -= dt;
+        if (t->cr_mode == CR_REST && crab_find_due(t) && t->cr_timer > 4) t->cr_timer = 4;                     /* a find due: up and off to dig */
         if (t->cr_timer > 0 || t->cr_fidget_kind == CR_FID_SHUFFLE || t->cr_fidget_kind == CR_FID_STANDOFF) return;
+        if (crab_find_due(t)) {                                                                               /* ... no shelter, no climb: the next walk ends in a dig */
+            if (t->cr_mode == CR_DIG) { t->cr_timer = tank_randf(t, CR_DIG_S_LO, CR_DIG_S_HI); return; }     /* (a dig that missed the pick: another round) */
+            crab_set_walk(t, t->cr_x + tank_randf(t, CR_WALK_LO, CR_WALK_HI) * (tank_randf(t, 0, 1) < 0.5f ? -1 : 1), CR_WALK);
+            return;
+        }
         if (t->cr_outing >= CR_OUTING_S * (t->night ? CR_NIGHT_OUT : 1)) {                                    /* time for a shelter (a night crab stays out longer in the dark) */
             int c = crab_cave(t);
             if (c >= 0) { t->cr_cave = (int8_t)c; crab_set_walk(t, tank_decor_x(t, c), CR_SHELTER); return; }
@@ -1581,12 +1653,22 @@ static void crab_tick(tank_t *t, float dt) {
         if (t->cr_cave < 0 && crab_snail_x(t, &sx) && (sx - t->cr_x) * t->cr_facing > 0 && fabsf(sx - t->cr_x) < CR_SNAIL_GAP) { crab_stop(t); return; }   /* the snail ahead: it stops short */
         if (crab_advance(t, dt)) {
             if (t->cr_cave == 9 && tank_decor_in(t, 9) && t->cr_since_climb >= CR_CLIMB_EVERY_S) {            /* at the foot: up it goes */
-                t->cr_cave = -1; crab_mode(t, CR_CLIMB); t->cr_climb = 0; t->cr_facing = -t->cr_side; return;
+                t->cr_cave = -1; crab_mode(t, CR_CLIMB); t->cr_climb = 0; t->cr_nibble = 0; t->cr_nibble_i = 0; t->cr_facing = -t->cr_side; return;
             }
             t->cr_cave = -1; crab_stop(t);
         }
         return; }
     }
+}
+/* the rare climb, now (the director, the sim; Strato 2026-10-24: "let me see how it looks") */
+bool tank_crab_climb(tank_t *t) {
+    if (!(t->sd_unlocks & SD_ITEM_CRAB) || t->cr_x < 0 || t->cr_mode == CR_CLIMB || !tank_decor_in(t, 9)) return false;
+    float vx = tank_decor_x(t, 9);
+    t->cr_since_climb = CR_CLIMB_EVERY_S; t->cr_find = 0; t->cr_poke = 0; t->cr_scurry = false; t->cr_hide = 0; t->cr_nibble = 0; t->cr_nibble_i = 0;
+    t->cr_side = t->cr_x < vx ? -1 : 1;
+    crab_set_walk(t, vx + t->cr_side * tank_volcano_half(VOLCANO_BASE_CELL, t->cr_side) * 2.0f, CR_WALK);
+    t->cr_cave = 9;
+    return true;
 }
 /* send it to a shelter now (the director, the sim): 2 the castle's arch, 9 the volcano's cave, -1 the nearer
    of those in the water; it walks there and roosts. false = no crab, it is climbing, or no such shelter */
@@ -1598,6 +1680,29 @@ bool tank_crab_roost(tank_t *t, int cave) {
     crab_set_walk(t, tank_decor_x(t, cave), CR_SHELTER);
     return true;
 }
+bool tank_crab_pellet_race(tank_t *t, float gap, int n) {
+    if (!(t->sd_unlocks & SD_ITEM_CRAB) || t->cr_x < 0 || t->cr_mode == CR_CLIMB) return false;
+    const float dir = t->cr_x < (TANK_FX0 + TANK_FX1) * 0.5f ? 1.0f : -1.0f, px = clampf(t->cr_x + dir * gap, TANK_FX0 + 30, TANK_FX1 - 30);
+    static const float DX[4] = { 0, 18, -15, 9 };                  /* a cluster, as a few feeds on one spot leave them */
+    int k = -1;
+    for (int j = 0, i = 0; j < (n < 1 ? 1 : n > 4 ? 4 : n); j++) {
+        while (i < MAX_FOOD && t->food[i].alive) i++;
+        if (i >= MAX_FOOD) break;
+        food_t *p = &t->food[i];
+        p->alive = true; p->from_player = false; p->x = clampf(px + DX[j] * dir, TANK_FX0 + 20, TANK_FX1 - 20); p->y = FOOD_FLOOR_Y; p->age = 0; p->floor_s = 1; p->nibbled = 0;
+        if (k < 0) k = i;
+    }
+    if (k < 0) return false;
+    if (t->sd_unlocks & SD_ITEM_SHRIMP)
+        for (int i = 0; i < t->shrimp_n; i++) {                       /* the school at it, pecking */
+            shrimp_t *q = &t->shrimp[i];
+            q->x = px + (i - t->shrimp_n * 0.5f) * 5; q->y = FOOD_FLOOR_Y - 4; q->vx = q->vy = 0; q->dart = 0; q->facing = (int8_t)(q->x < px ? 1 : -1);
+        }
+    t->cr_y = 0; t->cr_tilt = 0; t->cr_cave = -1; t->cr_scurry = false; t->cr_hide = 0; t->cr_find = 0; t->cr_poke = 0; t->cr_shoo = 0;
+    t->cr_claim = -1; t->cr_full = 0; t->cr_food = (int8_t)k; t->cr_facing = (int8_t)dir;
+    t->cr_to = px - CR_REACH * dir; crab_mode(t, CR_FEED);
+    return true;
+}
 void tank_crab_place(tank_t *t) {
     float x0, x1; tank_veg_bed(t, 0, &x0, &x1, NULL, NULL);       /* out on the open sand right of the reef bed (past the urchin's spot) */
     t->cr_x = clampf(x1 + 70, crab_lo(), crab_hi());
@@ -1607,6 +1712,7 @@ void tank_crab_place(tank_t *t) {
     t->cr_taps = 0; t->cr_tap_t = -100; t->cr_scurry = false; t->cr_hide = 0; t->cr_back = 0;
     t->cr_startle_cool = 0; t->cr_find = 0; t->cr_find_cool = tank_randf(t, CR_FIND_FIRST_LO_S, CR_FIND_FIRST_HI_S); t->cr_was_night = t->night; t->cr_stood = false;
     t->cr_lane_front = true; t->cr_next_dig = false;
+    t->cr_claim = -1; t->cr_shoo = 0; t->cr_meals = 0; t->cr_full = 0;
 }
 
 void tank_urchin_place(tank_t *t) {
@@ -1984,6 +2090,7 @@ static void seahorse_tick(tank_t *t, float dt) {
  * 2026-09-29 mockup Strato approved. */
 #define SHRIMP_CRUISE    12.0f        /* px/s */
 #define SHRIMP_DART      58.0f        /* px/s, the tail-flick escape */
+#define SHRIMP_FLEE_X    3.0f         /* the school's flight from the crab: 36 px/s, three times its cruise (Strato: "faster than their slow usual swim") */
 #define SHRIMP_SEP_X     18.0f        /* personal space, side to side (a body and a bit) ... */
 #define SHRIMP_SEP_Y     11.0f        /* ... and up and down (7 stacked them in towers on the glass) */
 #define SHRIMP_TAP_R     30.0f        /* a fingertip on a shrimp: its card */
@@ -2055,6 +2162,8 @@ static float shrimp_canopy_y(const tank_t *t, float x) {
     return nb ? sum / nb : FOOD_FLOOR_Y;
 }
 static bool shrimp_food_ok(const tank_t *t, const food_t *p) {
+    if (t->cr_claim >= 0 && p == &t->food[t->cr_claim]) return false;   /* the crab's (0.3.9.1): it shooed them off it, or eats it */
+    if (t->shrimp_avoid_s > 0 && fabsf(p->x - t->shrimp_avoid_x) < CR_SHOO_ZONE_PX) return false;   /* ... and its neighbours: the area they were shooed from */
     return p->alive && (p->floor_s > 0 || p->y >= shrimp_canopy_y(t, p->x));
 }
 static void shrimp_tick(tank_t *t, float dt) {
@@ -2074,14 +2183,22 @@ static void shrimp_tick(tank_t *t, float dt) {
     }
     t->shrimp_tt -= dt;
     if (t->shrimp_tt <= 0) shrimp_goal(t, refusing);
+    const bool flee = t->shrimp_flee > 0;                         /* running from the crab: no food, all speed (0.3.9.1) */
+    if (flee) t->shrimp_flee -= dt;
+    if (t->shrimp_avoid_s > 0) {                                   /* the area they were shooed from: their goals keep out of it */
+        t->shrimp_avoid_s -= dt;
+        const float side = t->shrimp_avoid_side, edge = t->shrimp_avoid_x + side * (CR_SHOO_ZONE_PX + 20);
+        if ((t->shrimp_tx - edge) * side < 0) t->shrimp_tx = clampf(edge, TANK_FX0 + 40, TANK_FX1 - 40);   /* on the shoo's side, past the area */
+    }
     int fp = -1; float best = 1e9f;                                /* the pellet in reach nearest the school */
-    if (!refusing)
+    if (!refusing && !flee)
         for (int k = 0; k < MAX_FOOD; k++) {
             const food_t *p = &t->food[k];
             if (!shrimp_food_ok(t, p)) continue;
             float d = fabsf(p->x - cx) + fabsf(p->y - cy) * 0.5f;
             if (d < best) { best = d; fp = k; }
         }
+    t->shrimp_fp = (int8_t)fp;
     float gx = fp >= 0 ? t->food[fp].x : t->shrimp_tx;
     float gy = fp < 0 ? t->shrimp_ty : t->food[fp].floor_s > 0 ? FOOD_FLOOR_Y - 2 : t->food[fp].y;   /* on the floor, or still sinking */
     float spread = 40 + n * 9;                                    /* the school's width: 76 px for 4, 130 for 10 */
@@ -2101,7 +2218,7 @@ static void shrimp_tick(tank_t *t, float dt) {
             float tx = gx + (fp >= 0 ? ox * 0.45f : ox), ty = gy + (fp >= 0 ? 0 : oy);
             float dx = tx - q->x, dy = ty - q->y, d = sqrtf(dx * dx + dy * dy) + 1e-3f;
             bool chase = fp >= 0;                                       /* food in reach: they hurry, up or down alike */
-            float sp = fminf(SHRIMP_CRUISE * (chase ? 1.6f : 1.0f), d * 0.9f);
+            float sp = fminf(SHRIMP_CRUISE * (flee ? SHRIMP_FLEE_X : chase ? 1.6f : 1.0f), d * 0.9f);
             float wx = dx / d * sp, wy = dy / d * sp * (chase ? 1.0f : 0.7f);
             float sx = fp >= 0 ? SHRIMP_SEP_X * 0.6f : SHRIMP_SEP_X, sy = fp >= 0 ? SHRIMP_SEP_Y * 0.6f : SHRIMP_SEP_Y;
             for (int j = 0; j < n; j++) {
@@ -2109,7 +2226,7 @@ static void shrimp_tick(tank_t *t, float dt) {
                 float nx = (q->x - t->shrimp[j].x) / sx, ny = (q->y - t->shrimp[j].y) / sy, e = sqrtf(nx * nx + ny * ny);
                 if (e < 1 && e > 0) { wx += nx / e * (1 - e) * 22; wy += ny / e * (1 - e) * 9; }
             }
-            float a = fminf(1, dt * 2.5f);
+            float a = fminf(1, dt * (flee ? 6.0f : 2.5f));                 /* (fleeing: up to speed at once) */
             q->vx += (wx - q->vx) * a; q->vy += (wy - q->vy) * a;
             float hx = q->x + SHRIMP_HEAD * q->facing;
             for (int k = 0; k < MAX_FOOD; k++) {                       /* a pellet at its head */
@@ -2634,6 +2751,11 @@ void tank_tick_sleep(tank_t *t, float seconds) {
     cluster_grow(t, seconds);
     shrimp_sleep(t, seconds);
     if (t->sd_unlocks & SD_ITEM_SEAHORSE) { t->sh_s += seconds; t->sh_snack_cool = fmaxf(0, t->sh_snack_cool - seconds); }   /* days with the keeper run through the night */
+    if (t->sd_unlocks & SD_ITEM_CRAB) t->cr_full = fmaxf(0, t->cr_full - seconds);   /* hungry again by the morning */
+    if (t->sd_unlocks & SD_ITEM_CRAB) {                 /* the crab's next find: its wait runs asleep too; one held up when the tank slept is due again at the wake */
+        if (t->cr_find > 0) { t->cr_find = 0; t->cr_find_cool = 0; }
+        else t->cr_find_cool = fmaxf(0, t->cr_find_cool - seconds);
+    }
     /* the garden grows fastest in a dark, untended tank: waking to a taller
      * canopy and film on the glass is the morning chore. The night is lived
      * a SLEEP_SLICE_S at a time - the grass and the film grow, then the

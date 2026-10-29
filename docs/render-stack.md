@@ -26,7 +26,7 @@ live piece over everything and keep the critters in the scene pass.
 | 9 | the FRONT SLOT: the crab (in a volcano IN FRONT's cave or on its flank; its front lane on the sand; a dig, always), then the snail, then the urchin in their front lane | the crab lowest here too |
 | 10 | the front grass: a MIDDLE bed's ODD fronds (off the arch: those went at rank 2), then a bed placed IN FRONT with its every frond, WHOLE - across the arch too, unshaded | a MIDDLE bed's fronds keep off every piece IN FRONT's silhouette; a bed IN FRONT keeps off only the pieces ranked above it |
 | 11 | a placement page's live piece | over everything; the front slot is off while one is up - a critter in its front lane goes to the TOP lane instead, so it stays before the live piece as it was before the baked one |
-| 12 | the pieces IN FRONT's overlays: crowns, the candle, the volcano's lava and embers, the pumpkin's face and flame | the lava and the pumpkin's face keep off a crab in the front slot (g_cr_guard in vo_store and pk_store) |
+| 12 | the pieces IN FRONT's overlays: crowns, the candle, the volcano's lava and embers, the pumpkin's face and flame | the lava and the pumpkin's face keep off every critter in the front slot - the crab, the snail, the urchin (g_guard / slot_covers in vo_store and pk_store) |
 | 13 | the TOP lane: the seahorse's front lane, the crab holding a sand dollar up; with a page up, the crab's, the snail's and the urchin's front lane | over the fronds, so the keeper sees the find |
 | 14 | the arch's shade through a castle IN FRONT | what was drawn in the opening this frame and left marked (a fish, a MIDDLE bed's late frond); a bed IN FRONT's fronds are final and keep their colour |
 
@@ -34,7 +34,8 @@ live piece over everything and keep the critters in the scene pass.
 
 - Subjects: the CRAB in nine states (walk in either lane, rest, dig, the
   walk into a shelter, roost, backed in, climb, holding a find); the
-  URCHIN and the SNAIL in either lane.
+  URCHIN and the SNAIL in either lane, at a piece's flank and at its
+  middle (a cave mouth, the arch, the lantern's face).
 - Pieces: none; the castle, the volcano, the coral, the cluster and the
   pumpkin, each BEHIND and IN FRONT. The coral, the cluster and the pumpkin
   have no cave or arch: the crab's shelter states cannot meet them. In
@@ -48,6 +49,10 @@ live piece over everything and keep the critters in the scene pass.
 - The tint: a bed placed IN FRONT of the castle, its fronds crossing the
   arch pixel for pixel the same colour with the castle standing as without
   it (688 of 1323 were shaded before the fix), day and night.
+
+- The strict rule: a subject in front of a piece IN FRONT shows the piece
+  on (almost) none of its pixels - at most 1 in 20 - not just "clearly
+  less" (the castle aside: its front row meets the crab in the arch).
 
 ## The rules behind it
 
@@ -100,3 +105,16 @@ it never showed. A final span now clears its marks wherever such a pass
 could reach it (span_final / span_final2 in the ring, veg_put across the
 arch). The lesson is the matrix's own: run it in all four worlds, every
 time - docs/BOARDS.md rule 6 is not a formality.
+
+What it missed next (0.3.9.1, Strato on the 1.8, the light on and off):
+the front volcano's lava in its cave painted over the urchin walking past
+in its front lane. Two holes. The urchin and the snail stood only at a
+piece's flank, where the volcano has no lava and the lantern no face; and
+the 2:1 rule judged the piece's whole silhouette, so a patch of lava (66
+px of 319) over the critter still read as "the urchin in front". The guard
+that kept the lava and the face off the crab now keeps them off every
+critter in the front slot; the matrix stands the urchin and the snail at
+the middle too, and in front of a piece the piece must show on almost none
+of the subject. Without the fix it fails twelve cells: the urchin and the
+snail at the front volcano's cave and before the front lantern, the light
+on and off.

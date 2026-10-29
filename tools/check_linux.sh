@@ -25,9 +25,13 @@ docker info >/dev/null 2>&1 || { echo "check_linux: Docker is not running (open 
 W=$(mktemp -d /tmp/pt-linux-check.XXXXXX)
 if [ "$DIRTY" = 1 ]; then rsync -a --exclude .git --exclude 'sim/build*' --exclude sim/lvgl --exclude 'sim/fishsim*' ./ "$W/"
 else git archive HEAD | tar -x -C "$W"; fi
-# the model: the public tree tracks model/out, dev does not - CI runs NOMODEL=1 without it
-[ -f "$W/model/out/model_q4.bin" ] || [ ! -f model/out/model_q4.bin ] || cp model/out/model_q4.bin "$W/model/out/"
-NOMODEL=""; [ -f "$W/model/out/model_q4.bin" ] || NOMODEL="NOMODEL=1"
+# the model: the public tree tracks model/out, dev does not - CI runs NOMODEL=1 without it. The LLM selftests read
+# model.bin and tokenizer.bin, not only model_q4.bin (2026-10-25: a worktree with model/out linked to the main
+# checkout copied model_q4.bin alone, so the check ran --selftest-llm without its files and stopped there); cp follows
+# the links
+mkdir -p "$W/model/out"
+for f in model_q4.bin model.bin tokenizer.bin; do [ -f "$W/model/out/$f" ] || [ ! -f "model/out/$f" ] || cp "model/out/$f" "$W/model/out/"; done
+NOMODEL=""; { [ -f "$W/model/out/model.bin" ] && [ -f "$W/model/out/tokenizer.bin" ]; } || NOMODEL="NOMODEL=1"
 echo "check_linux: $W ($([ "$DIRTY" = 1 ] && echo the working tree || echo HEAD $(git rev-parse --short HEAD)), $([ -n "$NOMODEL" ] && echo no model || echo with the model))"
 if [ "$ALL" = 1 ]; then
   SCRIPT='tests=$(grep -A2 "^SELFTESTS :=" sim/Makefile | tr -d "\\\\\n" | sed "s/SELFTESTS :=//");

@@ -18,6 +18,7 @@
 const char *net_port_manifest_url(void);
 bool net_port_set_manifest_url(const char *url);
 #include "touch_port.h"
+#include "advanced.h"
 #include "battery_port.h"
 #include "display_port.h"
 #include "board_pins.h"
@@ -202,7 +203,7 @@ static void help(void) {
     ESP_LOGI(TAG, "STAGED TANKS (the real one is parked first): fresh (new tank, two fry) | stages (fry juv adult elder) | stage <fish|all> <fry|juv|adult|elder>");
     ESP_LOGI(TAG, "stash (park the real tank now) | restore (bring it back) | age <fish> <hours>");
     ESP_LOGI(TAG, "milestones [off] (the page, on cue; on the device: tap the open stats card)");
-    ESP_LOGI(TAG, "crab [x <px> | roost [castle|volcano] | tap | scare | find] (the strawberry crab, 0.3.9: where it is and what it is doing; set it down; send it to roost now; claws up; three taps - it runs for cover; find = it digs up a sand dollar within seconds)");
+    ESP_LOGI(TAG, "crab [x <px> | roost [castle|volcano] | tap | scare | find | shoo [gap [n]]] (the strawberry crab, 0.3.9: where it is and what it is doing; set it down; send it to roost now; claws up; three taps - it runs for cover; find = it digs up a sand dollar within seconds; shoo = a pellet gap px off (45; n = a cluster of 1..4), the shrimp on it, the crab going for it - near enough it shoos them, from far off they win)");
     ESP_LOGI(TAG, "fry [open|roll|buy <0-2>] (the shop's fry: open = as if a fish was sold; roll = a fresh three now)");
     ESP_LOGI(TAG, "shop [off] (the sand dollar page) | dollars [n] (grant n; the balance and the chore counts) | buy plant|snail|castle|coral|cluster|shrimp|urchin|seahorse (at the price) | seahorse on|off (drawn or not: the fps A/B) | place [plant|castle|coral] [x [behind|among|front]] (the piece's spot; no x = the page; the castle has no among) | coral <0-7|rrggbb> (its colour) | coral grow <g> (its growth, 1 = the fan, 1.25 = the crown) | cluster look <0-2> | cluster grow <g> (1 = full size, 2 = every tentacle) | sell plant|castle|coral|cluster (20%% back) | shelve|unshelve <piece> | lock|unlock <piece> (a held finger passes a locked piece by)");
     ESP_LOGI(TAG, "reset (the keeper's confirm prompt, as BOOT + tap opens it) | reset yes|no (answer it here) - YES WIPES EVERY SAVE, a parked tank too");
@@ -210,6 +211,7 @@ static void help(void) {
     ESP_LOGI(TAG, "battery <pct> [charging|full|plugged]|real (a STAGED gauge: on battery at pct - the card's pill, and at 10 or less the low-battery notice + cue + the pill that stays - or on the cable: the bolt, the sweep while charging, the pill for a few seconds; not saved) | battery page [off] (the battery page, as a tap on the pill opens it) | battery (its numbers) | snd battery (just the notice + cue)");
     ESP_LOGI(TAG, "kbd [wheel|grid|pages] (the name page's design: the wheel, or one of the two rejected keyboards of 09-13 - not saved, a boot is the wheel)");
     ESP_LOGI(TAG, "touch [bias <px>] [log on|off] [lift <ms>] [said on|off] (finger-landing correction: reported touches move up by px; not saved; also the raw span seen since boot)");
+    ESP_LOGI(TAG, "advanced [off] (the hidden ADVANCED page: battery size + touch calibration; on the glass: settings, BOOT held 5 s, then a tap)");
     ESP_LOGI(TAG, "charge [mA] (the charger live: state, VBUS, die temperature; a current tried until the next boot) | pmic (AXP2101 dump) | pmic on|off <aldo1|aldo2..4|bldo1|bldo2|cpusldo|dcdc2..5|dldo1|dldo2> (experiments; boot trims the unused ones) | pmic trim");
     ESP_LOGI(TAG, "bright <0-255> (panel now; not saved) | level 5..100 by 5 (the keeper's setting, saved)");
     ESP_LOGI(TAG, "batlog [clear] (the tank's own battery log: SoC/VBAT every 5 min awake, 30 min asleep, mA derived - read it after a night on battery) | codec (ES8311 registers) | clock (the clock: RTC chip or the internet's time, and whether tonight is a power-off) | sleepcfg [mask] (the round board's deep-sleep savings: 1 touch, 2 panel, 4 IMU, 8 QSPI held; 15 = all, the default) | deepsleep [N] (N: 5 s grace then deep sleep with an N s timer wake - one batlog window per N, BOOT wakes it; no N: the keeper's sleep, grace then power-off) | poweroff (save + PMIC cut now) | keytime [N] (N s of timing every PWR press - is a tap under the PMIC's 128 ms power-on hold?)");
@@ -345,6 +347,16 @@ static void run(tank_t *t, char *line) {
     } else if (!strcmp(c, "settings")) {
         bool on = argc < 2 || strcmp(argv[1], "off");
         touch_port_show_settings(on); ESP_LOGI(TAG, "settings page %s", on ? "up (CLOSE ends it)" : "closed");
+    } else if (!strcmp(c, "advanced")) {        /* the hidden ADVANCED page (0.3.9.2) without the BOOT chord: advanced [off] */
+        bool on = argc < 2 || strcmp(argv[1], "off");
+        if (on) touch_port_open_advanced(); else adv_close();
+#if ADV_BATTERY_ROW
+        ESP_LOGI(TAG, "advanced page %s | battery %d mAh -> %d mA (the board's own %d mAh) | touch %s", on ? "up (BACK ends it)" : "closed",
+                 adv_cell(), adv_charge_ma(adv_cell()), ADV_CELL_STOCK, touch_fit_is_none(adv_touch_fit()) ? "the board's own map" : "the keeper's map");
+#else   /* (this fork) a 320 x 240 board's page is TOUCH alone (advanced.h): no size to report */
+        ESP_LOGI(TAG, "advanced page %s | touch %s | no battery row (no charger to set)", on ? "up (BACK ends it)" : "closed",
+                 touch_fit_is_none(adv_touch_fit()) ? "the board's own map" : "the keeper's map");
+#endif
     } else if (!strcmp(c, "milestones")) {
         bool on = argc < 2 || strcmp(argv[1], "off");
         touch_port_show_milestones(on); ESP_LOGI(TAG, "milestones page %s", on ? "up (CLOSE button ends it)" : "closed");
@@ -374,7 +386,7 @@ static void run(tank_t *t, char *line) {
                                                     tank_decor_placeable(item) ? " (`place` opens the placement page)" : "");
         else ESP_LOGW(TAG, "%s refused: owned, not sold by this build, or %d < %d", SD_ITEMS[item].name, (int)t->sd_balance, SD_ITEMS[item].price);
     } else if (!strcmp(c, "crab")) {                 /* crab [x <px> | roost [castle|volcano] | tap | scare]: the strawberry crab (0.3.9) - set it down, send it to roost now, poke it, scare it */
-        static const char *const M[] = { "resting", "walking", "digging", "heading for a shelter", "roosting", "going for food", "eating", "climbing" };
+        static const char *const M[] = { "resting", "walking", "digging", "heading for a shelter", "roosting", "going for food", "eating", "climbing" };   /* (climbing + cr_nibble: nibbling the rock) */
         if (!(t->sd_unlocks & SD_ITEM_CRAB) || t->cr_x < 0) ESP_LOGW(TAG, "no crab in the tank (`buy crab`)");
         else {
             if (argc > 2 && !strcmp(argv[1], "x")) { t->cr_x = (float)atof(argv[2]); t->cr_y = 0; t->cr_tilt = 0; t->cr_mode = CR_REST; t->cr_mode_s = 0; t->cr_timer = 20; t->cr_cave = -1; }
@@ -382,11 +394,14 @@ static void run(tank_t *t, char *line) {
                 int cave = argc > 2 ? (!strcmp(argv[2], "castle") ? 2 : !strcmp(argv[2], "volcano") ? 9 : -1) : -1;
                 if (!tank_crab_roost(t, cave)) ESP_LOGW(TAG, "crab: no %s in the water to roost in (or it is climbing)", argc > 2 ? argv[2] : "castle or volcano");
             } else if (argc > 1 && !strcmp(argv[1], "tap")) tank_crab_tap(t, t->cr_x + 20);
+            else if (argc > 1 && !strcmp(argv[1], "climb")) { if (!tank_crab_climb(t)) ESP_LOGW(TAG, "crab: no volcano in the water to climb (or no crab, or it is climbing)"); }
             else if (argc > 1 && !strcmp(argv[1], "scare")) tank_crab_scare(t, t->cr_x + 20);
-            else if (argc > 1 && !strcmp(argv[1], "find")) { t->cr_find_cool = 0; t->cr_y = 0; t->cr_tilt = 0; t->cr_cave = -1; t->cr_mode = CR_DIG; t->cr_mode_s = 0; t->cr_timer = 60; t->cr_find = 0; }   /* the next pick comes up with it */
-            ESP_LOGI(TAG, "crab: %s at x %.0f (floor %.0f..%.0f), facing %s%s%s", t->cr_mode < 8 ? M[t->cr_mode] : "?", t->cr_x, (double)TANK_FX0, (double)TANK_FX1,
+            else if (argc > 1 && !strcmp(argv[1], "shoo")) { if (!tank_crab_pellet_race(t, argc > 2 ? (float)atof(argv[2]) : 45.0f, argc > 3 ? atoi(argv[3]) : 1)) ESP_LOGW(TAG, "crab: no room for a pellet (or it is climbing)"); }   /* 0.3.9.1: the race for a pellet */
+            else if (argc > 1 && !strcmp(argv[1], "find")) { t->cr_find_cool = 0; t->cr_y = 0; t->cr_tilt = 0; t->cr_cave = -1; t->cr_mode = CR_DIG; t->cr_mode_s = 0; t->cr_timer = 60; t->cr_find = 0; tank_handled(t); }   /* the next pick comes up with it (0.3.9.1: the keeper "here"; the light must be on) */
+            ESP_LOGI(TAG, "crab: %s at x %.0f (floor %.0f..%.0f), facing %s%s%s", t->cr_mode == CR_CLIMB && t->cr_nibble > 0 ? "climbing, nibbling the rock" : t->cr_mode < 8 ? M[t->cr_mode] : "?", t->cr_x, (double)TANK_FX0, (double)TANK_FX1,
                      t->cr_facing > 0 ? "right" : "left", t->cr_cave == 2 ? ", the castle" : t->cr_cave == 9 ? ", the volcano" : "", t->cr_find > 0 ? ", HOLDING A SAND DOLLAR (tap it)" : t->cr_poke > 0 ? ", claws up" : t->cr_scurry ? ", running" : t->cr_hide > 0 ? ", hiding in the dark" : "");
-            ESP_LOGI(TAG, "crab: %u pellets found, %u sand dollars dug up (%u paid), next find in %.0f min of awake time", (unsigned)t->cr_eaten, (unsigned)t->cr_found, (unsigned)t->cr_found_paid, t->cr_find_cool / 60);
+            if (t->cr_full > 0) ESP_LOGI(TAG, "crab: full - fallen pellets do not tempt it for %.0f s more", t->cr_full);
+            ESP_LOGI(TAG, "crab: %u pellets found, %u sand dollars dug up (%u paid), next find due in %.0f min of lived time (then it waits for the keeper: the light on, a touch in the last 5 min)", (unsigned)t->cr_eaten, (unsigned)t->cr_found, (unsigned)t->cr_found_paid, t->cr_find_cool / 60);
             if (tank_decor_in(t, 2)) ESP_LOGI(TAG, "crab: the castle's arch is at x %.0f", tank_decor_x(t, 2));
             if (tank_decor_in(t, 9)) ESP_LOGI(TAG, "crab: the volcano's cave is at x %.0f", tank_decor_x(t, 9));
         }

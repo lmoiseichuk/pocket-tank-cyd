@@ -568,6 +568,8 @@ typedef struct tank {
     float    cr_poke;              /* seconds left of its claws up after a tap */
     float    cr_gait;              /* the gait's phase, radians: advances with the ground it covers (render: the stride) */
     float    cr_climb;             /* the climb's progress: 0..1 up the flank, 1..2 down again */
+    float    cr_nibble;            /* seconds left of a stop on the way, nibbling the rock (0.3.9.1); the climb waits */
+    uint8_t  cr_nibble_i;          /* the next stop (CR_NIBBLE_AT) this climb */
     float    cr_outing;            /* seconds out of a shelter so far: when enough have passed it looks for one */
     float    cr_since_climb;       /* seconds since it last climbed the volcano (not saved: a rare thing) */
     uint16_t cr_eaten;             /* pellets it has found and eaten, lifetime (saved; its card) */
@@ -583,7 +585,7 @@ typedef struct tank {
                                     * out over CR_BACK_OUT_S after (render: smaller, higher, darker with it - it BACKS UP, never a switch; Strato 10-24) */
     float    cr_startle_cool;      /* seconds until a fish passing over it can raise its claws again (not saved) */
     float    cr_find;              /* seconds left holding a SAND DOLLAR up for the keeper (0 = none; not saved): a tap on it takes it */
-    float    cr_find_cool;         /* seconds of awake life until the next find can turn up in a dig (not saved: CR_FIND_*) */
+    float    cr_find_cool;         /* seconds of lived time, asleep too, until the next find is due (saved, 0.3.9.1: CR_FIND_*) */
     uint16_t cr_found;             /* sand dollars it has dug up and the keeper took, lifetime (saved; its card, the badge) */
     uint16_t cr_found_paid;        /* ... of which the ledger has paid (saved: a find is never paid twice) */
     bool     cr_was_night;         /* the light at the last tick: it comes out when the light goes off, heads in when it comes on */
@@ -591,6 +593,10 @@ typedef struct tank {
     bool     cr_lane_front;        /* its LANE for this walk and the stop after it: in front of the pieces IN FRONT, or behind (render's front
                                     * slot); rolled 60/40 at a walk's start while clear of every such piece; a dig is ALWAYS in front (Strato 10-24) */
     bool     cr_next_dig;          /* the stop this walk ends in digs (decided at the walk's start, so the lane can be chosen for it) */
+    int8_t   cr_claim;             /* the pellet it has claimed (0.3.9.1): shooed the shrimp off it, or eating it - not theirs while it holds (-1 none) */
+    float    cr_shoo;              /* seconds left standing, claws up at the shrimp, before it walks on to the food */
+    uint8_t  cr_meals;             /* pellets since it was last full (not saved) */
+    float    cr_full;              /* seconds before a fallen pellet tempts it again (CR_MEALS_FULL, then CR_FULL_*; not saved) */
     /* the seahorse (SD_ITEM_SEAHORSE, 0.3.6, 2026-10-15): the tame one. It
      * holds a grass blade with its tail (a BEHIND-layer frond, so it is never
      * covered), drifts to another now and then, and when a finger rests on
@@ -700,8 +706,13 @@ typedef struct tank {
     int32_t  shrimp_eaten;         /* pellets the school has eaten, lifetime (its card; saved) */
     uint8_t  shrimp_taps;          /* quick taps on the school in a row (the third scares them; not saved) */
     float    shrimp_tap_t;         /* seconds since the last one */
+    float    shrimp_flee;          /* seconds left of the school's flight from the crab (0.3.9.1): SHRIMP_FLEE_X its cruise, food ignored (not saved) */
+    float    shrimp_avoid_x;       /* where the crab shooed them: no pellet within CR_SHOO_ZONE_PX of it is theirs, no goal of theirs in it ... */
+    float    shrimp_avoid_s;       /* ... for this many seconds more (not saved) */
+    int8_t   shrimp_avoid_side;    /* ... and the side of it the shoo sent them to (+1 right, -1 left): their goals stay there */
     shrimp_t shrimp[SHRIMP_MAX];
     float    shrimp_tx, shrimp_ty, shrimp_tt;
+    int8_t   shrimp_fp;            /* the pellet the school is after this frame (-1 none): the crab reads it (0.3.9.1) */
     /* keeper habits the tank remembers (persisted by progression.c) */
     float    feed_spot_x;          /* where the keeper usually feeds (EMA); <0 = unknown */
     int      player_feedings;      /* MEALS: feedings the fish ate from (2026-09-14, Strato: a tap
@@ -1248,6 +1259,7 @@ enum { CR_REST = 0, CR_WALK, CR_DIG, CR_SHELTER, CR_ROOST, CR_FEED, CR_EAT, CR_C
  * turns about or settles lower; roosting it stretches its claws open now and then */
 enum { CR_FID_NONE = 0, CR_FID_GROOM, CR_FID_SHUFFLE, CR_FID_SETTLE, CR_FID_STRETCH, CR_FID_STANDOFF };   /* STANDOFF: claws up at the snail, then the step aside (Strato 10-24) */
 #define CR_PICK_S   2.4f       /* a dig's (and a meal's) pick: down to the sand, pinch, a bite up to its face */
+#define CR_NIBBLE_S 3.6f       /* a stop on the volcano's flank: a pick and a half at the rock (0.3.9.1, Strato: "stop along the way and nibble the volcanic rocks") */
 #define CR_GROOM_S  1.6f
 #define CR_SETTLE_S 1.2f
 #define CR_STRETCH_S 1.8f
@@ -1262,23 +1274,54 @@ enum { CR_FID_NONE = 0, CR_FID_GROOM, CR_FID_SHUFFLE, CR_FID_SETTLE, CR_FID_STRE
 #define LANE_FRONT_ODDS 0.6f
 /* the SAND DOLLAR FIND (Strato 2026-10-24: "I want it to be fun and seem like a really nice reward"): once in a
  * while a dig turns one up; it holds it up in its claw, glinting, for CR_FIND_HOLD_S - a tap on the crab takes it
- * (SD_CRAB_FIND, progression's ledger: cr_found / cr_found_paid) - or it buries it again. The wait between finds
- * runs on awake time and is not saved: the first comes soon after the purchase, a boot waits a while, a find taken
- * waits the longest, one missed comes round sooner. */
-#define CR_FIND_HOLD_S      60.0f
+ * (SD_CRAB_FIND, progression's ledger: cr_found / cr_found_paid) - or it buries it again. The first comes soon
+ * after the purchase, a find taken waits the longest, one missed comes round sooner.
+ * 0.3.9.1 (Strato 10-25, keepers on Discord whose crab never found one): the wait is SAVED and runs on LIVED time,
+ * asleep too - in 0.3.9 it ran on awake time only and every boot started it again at 2-4 h, so a battery tank woken
+ * for an hour or two at a time never saw a find. And a find that is due WAITS FOR THE KEEPER (crab_find_due): the
+ * light on and the tank handled in the last CR_FIND_PRESENT_S; then the crab comes out and digs it up (a roost cut
+ * to CR_FIND_COME_S, no shelter, no climb, the next walk ends in a dig) and holds it 3 minutes, not one. The keeper
+ * always taps: nothing is collected for them. */
+#define CR_FIND_HOLD_S      180.0f
+#define CR_FIND_PRESENT_S   300.0f   /* the keeper is here: the tank was touched, picked up or woken this recently */
+#define CR_FIND_COME_S      20.0f    /* a due find calls the crab out of its roost this soon */
 #define CR_FIND_FIRST_LO_S  (45 * 60.0f)
 #define CR_FIND_FIRST_HI_S  (90 * 60.0f)
-#define CR_FIND_BOOT_LO_S   (2 * 3600.0f)
-#define CR_FIND_BOOT_HI_S   (4 * 3600.0f)
 #define CR_FIND_NEXT_LO_S   (6 * 3600.0f)
 #define CR_FIND_NEXT_HI_S   (8 * 3600.0f)
 #define CR_FIND_MISSED_LO_S (2 * 3600.0f)
 #define CR_FIND_MISSED_HI_S (4 * 3600.0f)
+/* THE CRAB'S PELLET (0.3.9.1; keepers on Discord: the shrimp take every pellet that reaches the floor, the crab never eats).
+ * Going for a pellet the school is after too, a shrimp within CR_SHOO_PX of its body's edge on the sand: it stops, claws up
+ * (CR_SHOO_S), the shrimp near it dart off tail first and the school leaves that pellet (cr_claim) - then it walks on to it.
+ * Only that close: a school that reached the pellet first may finish it before the crab gets there (Strato: "sometimes
+ * enough time to eat the food and some scenarios where they dont"). A pellet it is eating is claimed too. After
+ * CR_MEALS_FULL pellets it is full for CR_FULL_LO_S..HI_S: fallen food does not tempt it (Strato: 3 pellets, 5-10 min). */
+#define CR_REACH        12.0f    /* a pellet this far ahead of its middle is under its claw */
+#define CR_SHOO_PX      6.0f
+#define CR_SHOO_S       0.9f
+#define CR_SHOO_POKE    1.4f     /* the claws stay up a little into the walk on */
+#define CR_SHOO_AWAY_LO 90.0f    /* the school's next goal: this far past the crab, on their side (the other, against a wall) ... */
+#define CR_SHOO_AWAY_HI 140.0f
+#define CR_SHOO_KEEP_LO_S 8.0f   /* ... held this long: its walk on and its meal (CR_EAT_S 7) */
+#define CR_SHOO_KEEP_HI_S 12.0f
+#define CR_SHOO_FLEE_S  2.5f     /* the school's flight after the dart: fast, then the slow swim on to that goal */
+#define CR_SHOO_ZONE_PX 80.0f    /* and the AREA it was shooed from stays the crab's: no pellet this near the one it claimed is the school's,
+                                  * no goal of theirs this near it (Strato on the square: pellets land in clusters; the school took the next
+                                  * one over and "turned right back, never truly fled the area") ... */
+#define CR_SHOO_ZONE_S  25.0f    /* ... for this long */
+#define CR_SHOO_BAND    24.0f    /* a shrimp this far over the floor at most: on the sand with it, not swimming above */
+#define CR_MEALS_FULL   3
+#define CR_FULL_LO_S    (5 * 60.0f)
+#define CR_FULL_HI_S    (10 * 60.0f)
 #define CR_FLOOR_Y  (TANK_BOT - 15.0f)
 #define CR_HALF_W   22.0f
 void  tank_crab_place(tank_t *t);
 bool  tank_floor_clear(const tank_t *t, float x, float half);   /* no piece IN FRONT over [x - half, x + half] on the floor: a lane may change here */
 bool  tank_crab_hit(const tank_t *t, float x, float y);
+bool  tank_crab_climb(tank_t *t);                                  /* the director, the sim: the rare climb now - to the volcano's near foot, then up (false = no crab / no volcano / climbing already) */
+bool  tank_crab_pellet_race(tank_t *t, float gap, int n);   /* the director's / the sim's stage (0.3.9.1): n pellets (1..4, a cluster) gap px off
+                                                              the crab, the school huddled on the first, the crab going for it - near enough it shoos them */
 void  tank_crab_scare(tank_t *t, float fx); /* run for cover now (the tank's triple-tap startle calls it: a knock anywhere on the glass) */
 int   tank_crab_tap(tank_t *t, float fx);  /* a tap on it (fx: the finger's x): claws up; the third quick tap sends it running
                                              * into the nearer of the castle and the volcano (away from the finger with neither). Returns the taps so far;

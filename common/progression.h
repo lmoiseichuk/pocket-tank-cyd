@@ -197,6 +197,8 @@ const char *const *progression_fry_tip(int kind);
 #define SD_SNACK       10          /* the seahorse's snack, one paid per SH_SNACK_COOL_S (0.3.6) */
 #define SD_CRAB_FIND   10          /* a sand dollar the crab dug up and the keeper took (0.3.9; Strato 2026-10-24: a rare event, "worth a bit more") */
 #define SD_CRAB_FIND_AGAIN 20      /* ... every one after the first: the badge's reward (Strato 2026-10-24: "double the value of the subsequently found") */
+/* what n finds have paid: the crab's card shows this, not the count (0.3.9.1; Strato 10-24: the count of finds read as confusing) */
+#define SD_CRAB_FINDS_VALUE(n) ((n) == 0 ? 0u : (unsigned)SD_CRAB_FIND + (unsigned)SD_CRAB_FIND_AGAIN * ((unsigned)(n) - 1u))
 #define SD_CHORE       25          /* per SD_CHORE_EVERY colonies / SD_TRIM_CM of grass */
 #define SD_CHORE_EVERY 100
 /* the grass pays by length cut: 250 cm (2026-09-29, Strato; was 100 inches =

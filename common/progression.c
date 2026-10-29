@@ -216,6 +216,11 @@ typedef struct {
     uint8_t  cr_variant, pad_cr;
     uint16_t cr_eaten;
     uint16_t cr_found, cr_found_paid;   /* its sand dollar finds, and the ledger's count of them (0.3.9, in the old padding: sizeof stays 1936) */
+    /* the crab's wait for its next find (0.3.9.1): seconds of lived time + 1,
+     * so an older save's zero reads "never written" - the first-find window
+     * again, a find soon for every keeper who updates. Until then a boot
+     * started the wait again at 2-4 h of awake time. */
+    uint32_t cr_find_wait;
 } save_t;
 /* the smallest PTK2 save (pre-upkeep, 2026-08-30): anything shorter is not
  * ours. Every later build wrote sizeof(save_t) of its day - 448, 1112, 1304,
@@ -315,7 +320,9 @@ _Static_assert(sizeof(save_t) >= 1928, "SAVE LAYOUT LOCK: save_t only ever grows
 SAVE_AT(cr_x, 1924); SAVE_AT(cr_variant, 1928); SAVE_AT(pad_cr, 1929); SAVE_AT(cr_eaten, 1930);         /* the strawberry crab, 0.3.9 */
 SAVE_AT(cr_found, 1932); SAVE_AT(cr_found_paid, 1934);                                                 /* its finds, 0.3.9 (the padding of the same day) */
 _Static_assert(sizeof(save_t) >= 1936, "SAVE LAYOUT LOCK: save_t only ever grows");   /* 1936 of fields */
-/* (the next field: SAVE_AT(its_name, 1936 or its type's alignment past it);) */
+SAVE_AT(cr_find_wait, 1936);                                                                           /* the wait for its next find, 0.3.9.1 (main's 0.4 tail must reserve 1936..1939) */
+_Static_assert(sizeof(save_t) >= 1944, "SAVE LAYOUT LOCK: save_t only ever grows");   /* 1940 of fields, padded to 8 */
+/* (the next field: SAVE_AT(its_name, 1940 or its type's alignment past it);) */
 /* NVS budget: the save is one blob in the nvs partition (0x9000, 0x6000 =
  * 6 pages of 4096 B; tools/make_installer.py pins the row). A page is 126
  * entries of 32 B, and NVS keeps one page free for its garbage collection:
@@ -1003,7 +1010,7 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
         tank_crab_place(t);
         if (sv.cr_x > 0) t->cr_x = sv.cr_x;
         t->cr_found = sv.cr_found; t->cr_found_paid = sv.cr_found_paid > sv.cr_found ? sv.cr_found : sv.cr_found_paid;
-        t->cr_find_cool = tank_randf(t, CR_FIND_BOOT_LO_S, CR_FIND_BOOT_HI_S);   /* a boot waits a while for the next find (the wait is not saved) */
+        t->cr_find_cool = sv.cr_find_wait ? (float)(sv.cr_find_wait - 1) : tank_randf(t, CR_FIND_FIRST_LO_S, CR_FIND_FIRST_HI_S);   /* the saved wait (0.3.9.1); an older save: soon */
     } else t->cr_x = -1;
     if (t->sd_unlocks & SD_ITEM_SEAHORSE) {           /* back on a blade, its tally */
         tank_seahorse_place(t);
@@ -1260,6 +1267,7 @@ bool progression_save(tank_t *t) {
     sv.urchin_grazed_px = t->urchin_grazed_px > 0 ? t->urchin_grazed_px : 0;
     sv.cr_x = (t->sd_unlocks & SD_ITEM_CRAB) && t->cr_x > 0 ? t->cr_x : 0; sv.cr_variant = t->cr_variant; sv.cr_eaten = t->cr_eaten;
     sv.cr_found = t->cr_found; sv.cr_found_paid = t->cr_found_paid;
+    sv.cr_find_wait = 1u + (t->cr_find > 0 ? 0u : (uint32_t)fmaxf(0, t->cr_find_cool));   /* one held up: due again at the next load */
     if (t->sd_unlocks & SD_ITEM_SEAHORSE) {
         sv.sh_s = t->sh_s > 0 ? t->sh_s : 0; sv.sh_hitches = t->sh_hitches; sv.sh_trust_passed = t->sh_trust_passed;
         sv.sh_eaten = t->sh_eaten; sv.sh_snack_pay = t->sh_snack_pay; sv.sd_snacks_paid = t->sd_snacks_paid; sv.sh_snack_cool = t->sh_snack_cool > 0 ? t->sh_snack_cool : 0;

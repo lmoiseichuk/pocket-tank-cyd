@@ -14,6 +14,7 @@
 #define C_EDGE   0x9fd8e2
 #define C_INNER  0x1c2f36
 #define C_DIM    0x2a3f45
+#define C_QUIET  0x7f9aa1     /* quiet TEXT (render.c MSP_QUIET, 0.3.9.1: C_DIM text was too dark to read); C_DIM stays for shapes */
 #define C_KEY    0x0e2229
 #define C_TEXT   0xffffff
 #define C_CAPT   0x9fd8e2
@@ -161,14 +162,14 @@ void render_updates_page(uint16_t *fb, int stride) {
     snprintf(line, sizeof line, "VERSION %s %s", PT_RELEASE, PT_RELEASE_STAGE);
     render_text(fb, stride, 32, 62, 2, C_TEXT, line);
     snprintf(line, sizeof line, "BUILD %s", version_port_string());
-    render_text(fb, stride, 32, 84, 2, C_DIM, line);
+    render_text(fb, stride, 32, 84, 2, C_QUIET, line);
     char ssid[NET_SSID_MAX + 1], pass[NET_PASS_MAX + 1];
     if (net_port_creds_get(ssid, pass)) {
         render_text(fb, stride, 32, 122, 2, C_CAPT, "NETWORK");
         update_text(fb, stride, 32 + render_text_w("NETWORK", 2) + 14, 122, 2, C_TEXT, ssid);
     } else render_text(fb, stride, 32, 122, 2, C_CAPT, "NO NETWORK SAVED YET");
-    render_text(fb, stride, 32, 152, 2, C_DIM, "THE TANK PAUSES FOR A MOMENT");
-    render_text(fb, stride, 32, 174, 2, C_DIM, "AND COMES BACK BY ITSELF");
+    render_text(fb, stride, 32, 152, 2, C_QUIET, "THE TANK PAUSES FOR A MOMENT");
+    render_text(fb, stride, 32, 174, 2, C_QUIET, "AND COMES BACK BY ITSELF");
     render_button(fb, stride, UPD_CHECK_X, UPD_CHECK_Y, UPD_CHECK_W, UPD_CHECK_H, C_GO, C_GO_E, "CHECK FOR UPDATES", 2);
     if (net_port_creds_get(ssid, pass))
         render_button(fb, stride, UPD_FORGET_X, UPD_FORGET_Y, UPD_FORGET_W, UPD_FORGET_H, C_INNER, C_DIM, "FORGET NETWORK", 2);
@@ -305,7 +306,7 @@ static void draw_field(uint16_t *fb, int stride, float clock) {    /* the typed 
     update_text(fb, stride, x, y, 2, C_TEXT, p);
     if ((int)(clock * 2) & 1) render_rect(fb, stride, x + update_text_w(p, 2) + (*p ? 4 : 0), y, 2, 14, C_EDGE);
     char count[12]; snprintf(count, sizeof count, "%d", (int)n);
-    render_text(fb, stride, UX + UW - render_text_w(count, 1) - 8, FIELD_Y - 10, 1, C_DIM, count);
+    render_text(fb, stride, UX + UW - render_text_w(count, 1) - 8, FIELD_Y - 10, 1, C_QUIET, count);
 }
 
 /* ---- the pages ---- */
@@ -613,7 +614,7 @@ void render_update(uint16_t *fb, int stride, float clock) {
         text_c(fb, stride, 96, 3, C_TEXT, "PLUG IN TO UPDATE");
         snprintf(line, sizeof line, "THE BATTERY IS AT %d%%", s.battery_pct);
         text_c(fb, stride, 150, 2, C_CAPT, line);
-        text_c(fb, stride, 176, 2, C_DIM, "AN UPDATE NEEDS THE CABLE IN");
+        text_c(fb, stride, 176, 2, C_QUIET, "AN UPDATE NEEDS THE CABLE IN");
         render_button(fb, stride, UPD_BTN_MID_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, "BACK TO TANK", 2);
         break;
     case UPD_PG_BUSY:
@@ -628,7 +629,7 @@ void render_update(uint16_t *fb, int stride, float clock) {
             render_rect(fb, stride, BX + 2, BY + 2, (BW - 4) * s.percent / 100, BH - 4, C_EDGE);
             snprintf(line, sizeof line, "%d%%", s.percent); text_c(fb, stride, BY + 26, 2, C_TEXT, line);
             if (s.step == STEP_RESTART) text_c(fb, stride, 252, 2, C_CAPT, "RESTARTING");
-            else text_c(fb, stride, 252, 2, C_DIM, "KEEP THE TANK ON");
+            else text_c(fb, stride, 252, 2, C_QUIET, "KEEP THE TANK ON");
         } else spinner(fb, stride, CX, 214, clock);
         if (s.step != STEP_RESTART) render_button(fb, stride, UPD_BTN_MID_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, "CANCEL", 2);
         break;
@@ -642,7 +643,7 @@ void render_update(uint16_t *fb, int stride, float clock) {
             render_rect_edge(fb, stride, UX, y, UW - (pages > 1 ? 36 : 0), UPD_ROW_H - 4, C_INNER);
             update_text(fb, stride, UX + 12, y + (UPD_ROW_H - 4 - 14) / 2, 2, C_TEXT, s.aps[i].ssid);
             signal_bars(fb, stride, UX + UW - (pages > 1 ? 36 : 0) - 44, y + 8, s.aps[i].rssi);
-            if (!s.aps[i].secured) render_text(fb, stride, UX + UW - (pages > 1 ? 36 : 0) - 44 - 8 - render_text_w("OPEN", 1), y + 12, 1, C_DIM, "OPEN");
+            if (!s.aps[i].secured) render_text(fb, stride, UX + UW - (pages > 1 ? 36 : 0) - 44 - 8 - render_text_w("OPEN", 1), y + 12, 1, C_QUIET, "OPEN");
         }
         if (pages > 1) {                                       /* chevrons and pips on the right */
             int cx = UPD_ARROW_X + 4;
@@ -670,8 +671,8 @@ void render_update(uint16_t *fb, int stride, float clock) {
         int secs = (int)(bytes / 120000) + 10;
         if (secs < 90) snprintf(line, sizeof line, "IT TAKES ABOUT A MINUTE");
         else snprintf(line, sizeof line, "IT TAKES ABOUT %d MINUTES", (secs + 30) / 60);
-        text_c(fb, stride, 208, 2, C_DIM, line);
-        text_c(fb, stride, 230, 2, C_DIM, "THE TANK RESTARTS BY ITSELF");
+        text_c(fb, stride, 208, 2, C_QUIET, line);
+        text_c(fb, stride, 230, 2, C_QUIET, "THE TANK RESTARTS BY ITSELF");
         render_button(fb, stride, UPD_BTN_L_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_GO, C_GO_E, "UPDATE", 2);
         render_button(fb, stride, UPD_BTN_R_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, "NOT NOW", 2);
         break; }
@@ -689,7 +690,7 @@ void render_update(uint16_t *fb, int stride, float clock) {
         if (s.line1_ascii) atext_c(fb, stride, 130, 2, C_CAPT, s.line1); else text_c(fb, stride, 130, 2, C_CAPT, s.line1);
         if (s.line2[0]) text_c(fb, stride, 152, 2, C_CAPT, s.line2);
         if (s.step == STEP_UP_TO_DATE) {
-            snprintf(line, sizeof line, "VERSION %s %s", PT_RELEASE, PT_RELEASE_STAGE); text_c(fb, stride, 186, 2, C_DIM, line);
+            snprintf(line, sizeof line, "VERSION %s %s", PT_RELEASE, PT_RELEASE_STAGE); text_c(fb, stride, 186, 2, C_QUIET, line);
             float left = 1.0f - s.t / UPD_UP_TO_DATE_S; if (left < 0) left = 0;
             render_rect(fb, stride, UX, 220, (int)(UW * left), 2, C_INNER);
         }

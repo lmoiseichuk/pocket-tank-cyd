@@ -5,6 +5,7 @@
  * ~1 s (the pill answers a plug-in within a second); any I2C error or
  * absent battery hides the meter. */
 #include "battery_port.h"
+#include "advanced.h"
 #include "display_port.h"      /* board_is_square */
 #include "driver/i2c_master.h"
 #include "esp_timer.h"
@@ -275,6 +276,18 @@ int battery_port_vbat_mv(void) {
  * channels (VBUS, VSYS, the die's temperature) are switched on for the read
  * and put back: they are off the rest of the time (the battery pass). */
 int battery_port_charge_ma(void) { uint8_t v; return s_dev && rd(0x62, &v) ? icc_ma(v & 0x1F) : 0; }
+bool battery_port_set_cell(int mah) {
+    if (!s_dev) return false;
+    bool own = mah == ADV_CELL_STOCK;                  /* the board's own cell: the board's own rates, as at boot */
+    int ma = own ? board_charge_ma() : adv_charge_ma(mah), tr = own ? board_trickle_ma() : adv_trickle_ma(mah);
+    uint8_t v = 0; bool ok = rd(0x62, &v) && wr(0x62, (uint8_t)((v & 0xE0) | icc_code(ma)));
+    for (int i = 0; i < 2; i++) {                      /* 61 precharge, 63 end of charge */
+        uint8_t reg = i ? 0x63 : 0x61;
+        ok = rd(reg, &v) && wr(reg, (uint8_t)((v & 0xF0) | (tr / 25))) && ok;
+    }
+    ESP_LOGI("battery", "cell %d mAh%s: charge %d mA, precharge + end of charge %d mA%s", mah, own ? " (the board's own)" : "", icc_ma(icc_code(ma)), tr, ok ? "" : " - a write FAILED");
+    return ok;
+}
 bool battery_port_set_charge_ma(int ma) {
     uint8_t v; if (!s_dev || !rd(0x62, &v)) return false;
     return wr(0x62, (uint8_t)((v & 0xE0) | icc_code(ma)));

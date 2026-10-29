@@ -33,6 +33,11 @@ bool touch_port_pressed_since(int64_t us);     /* a finger is down and landed af
 bool touch_port_settings(void);
 void touch_port_show_settings(bool on);
 int  touch_port_take_setting(int *value);       /* SET_TAP_* or 0 */
+/* the ADVANCED page (0.3.9.2, common/advanced.c): opened by main.c's chord on the settings page (BOOT held 5 s,
+ * then a finger lands); while it is up adv_up() is true and it owns the glass. take_adv hands main ADV_ACT_CELL /
+ * ADV_ACT_FIT once (save it; tell the charger) */
+void touch_port_open_advanced(void);
+int  touch_port_take_adv(void);
 /* the shop page (2026-09-15): up / show it; an UNLOCK or MOVE tapped hands
  * the raw tap code (SHOP_TAP_BUY / SHOP_TAP_MOVE + item; 0 = none) to main
  * once, which buys (progression_buy) or opens the placement page */

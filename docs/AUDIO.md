@@ -131,6 +131,7 @@ Tiers are build order. Tier 1 alone is a shippable feature.
 | `coin` | sand dollars earned (the "+N" toast, render_sd_toast) | not yet: no cue in the bank; the toast is silent. A purchase plays `confirm` |
 | `low_battery` | gauge falls to 10% | once per discharge, with the low-battery modal and the persistent pill (section 4a) |
 | `error` | save failed, reset prompt | |
+| `crab_find` | the strawberry crab's dig comes up with a sand dollar (TEV_CRAB_FIND, 0.3.9.1) | Strato's pick 2026-10-25: working-assets/sounds/achievement-money_edit.wav (`make_sounds.py add`); the keeper's cue to look, since the find waits only 3 minutes in its claw |
 
 Not in scope: music, ambient loops, a per-decision sound (the LLM decides
 every ~4 s per fish; that would be constant noise), any sound in drowse.
